@@ -1,0 +1,34 @@
+# Core AST parsing
+tree-sitter>=0.22,<0.24
+tree-sitter-cpp>=0.22
+tree-sitter-java>=0.23
+tree-sitter-rust>=0.23
+tree-sitter-python>=0.23
+tree-sitter-typescript>=0.23
+
+# Graph database driver
+neo4j>=5.14
+
+# Vector store (Qdrant — Python 3.14 compatible)
+qdrant-client>=1.9
+
+# Embeddings model
+sentence-transformers>=3.0
+torch>=2.0  # required by sentence-transformers
+
+# Data models / validation
+pydantic>=2.6
+
+# CLI
+typer[all]>=0.12
+rich>=13.7
+click>=8.1
+
+# Git integration
+gitpython>=3.1
+
+# Docker SDK (sandbox)
+docker>=7.0
+
+# Utilities
+pathspec>=0.12

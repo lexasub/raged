@@ -1,0 +1,17 @@
+{
+  "id": "sig_get_method",
+  "category": "search",
+  "task": "Search functions matching get*",
+  "question": "Find functions matching get*",
+  "expected_tool": "search_by_signature",
+  "expected_params": {
+    "signature": "get*",
+    "limit": 10
+  },
+  "ground_truth_file": "ground_truth/sig_get_method.json",
+  "evaluation": {
+    "min_precision": 0.9,
+    "min_recall": 0.85,
+    "max_time_seconds": 2.0
+  }
+}

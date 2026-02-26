@@ -1,0 +1,17 @@
+{
+  "id": "callers_001",
+  "category": "analysis",
+  "task": "Find callers of main function",
+  "question": "Who calls the main function?",
+  "expected_tool": "find_callers",
+  "expected_params": {
+    "name": "main",
+    "depth": 1
+  },
+  "ground_truth_file": "ground_truth/callers_001.json",
+  "evaluation": {
+    "min_precision": 0.9,
+    "min_recall": 0.85,
+    "max_time_seconds": 3.0
+  }
+}

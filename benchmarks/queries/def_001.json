@@ -1,0 +1,16 @@
+{
+  "id": "def_001",
+  "category": "navigation",
+  "task": "Find class definition",
+  "question": "Where is ASTRagAPI defined?",
+  "expected_tool": "find_definition",
+  "expected_params": {
+    "name": "ASTRagAPI"
+  },
+  "ground_truth_file": "ground_truth/def_001.json",
+  "evaluation": {
+    "min_precision": 0.9,
+    "min_recall": 0.85,
+    "max_time_seconds": 2.0
+  }
+}

@@ -1,0 +1,83 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ast-rag"
+version = "0.1.0"
+description = "AST-based Retrieval-Augmented Generation system for multi-language codebase analysis"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "LGPL-3.0" }
+dependencies = [
+    # Tree-sitter core and language grammars
+    "tree-sitter>=0.24",
+    "tree-sitter-cpp>=0.22",
+    "tree-sitter-java>=0.23",
+    "tree-sitter-rust>=0.23",
+    "tree-sitter-python>=0.23",
+    "tree-sitter-typescript>=0.23",
+    # Graph database
+    "neo4j>=5.14",
+    # Vector store (Qdrant — Python 3.14 compatible)
+    "qdrant-client>=1.9",
+    # Embeddings
+    "sentence-transformers>=3.0",
+    # Data models
+    "pydantic>=2.6",
+    # CLI
+    "typer[all]>=0.12",
+    "rich>=13.7",
+    # Git integration
+    "gitpython>=3.1",
+    # Docker SDK (for sandbox)
+    "docker>=7.0",
+    # Utilities
+    "click>=8.1",
+    "pathspec>=0.12",
+    # Monitoring
+    "prometheus-client>=0.19",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio",
+    "mypy",
+    "ruff",
+    # MCP and watchdog needed for tests
+    "mcp>=1.0",
+    "watchdog>=4.0",
+]
+# Install on the GPU machine that runs embedding_server.py
+server = [
+    "fastapi>=0.111",
+    "uvicorn[standard]>=0.30",
+    "httpx>=0.27",  # used by embeddings.py in remote mode
+]
+# MCP server and file watcher support
+mcp = [
+    "mcp>=1.0",
+    "watchdog>=4.0",
+]
+
+[project.scripts]
+ast-rag = "ast_rag.cli:app"
+ast-rag-mcp = "ast_rag.ast_rag_mcp:main"
+ast-rag-watch = "ast_rag.watcher:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["ast_rag*"]
+
+[tool.setuptools.package-data]
+ast_rag = ["../schema/*.cql"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+
+[tool.mypy]
+python_version = "3.10"
+strict = false
+ignore_missing_imports = true

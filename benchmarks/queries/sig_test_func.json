@@ -1,0 +1,17 @@
+{
+  "id": "sig_test_func",
+  "category": "search",
+  "task": "Search functions matching *test*",
+  "question": "Find functions matching *test*",
+  "expected_tool": "search_by_signature",
+  "expected_params": {
+    "signature": "*test*",
+    "limit": 10
+  },
+  "ground_truth_file": "ground_truth/sig_test_func.json",
+  "evaluation": {
+    "min_precision": 0.9,
+    "min_recall": 0.85,
+    "max_time_seconds": 5.0
+  }
+}

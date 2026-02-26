@@ -1,0 +1,17 @@
+{
+  "id": "method_def_001",
+  "category": "navigation",
+  "task": "Find method definition",
+  "question": "Where is speak defined?",
+  "expected_tool": "find_definition",
+  "expected_params": {
+    "name": "speak",
+    "kind": "Method"
+  },
+  "ground_truth_file": "ground_truth/method_def_001.json",
+  "evaluation": {
+    "min_precision": 0.9,
+    "min_recall": 0.85,
+    "max_time_seconds": 2.0
+  }
+}

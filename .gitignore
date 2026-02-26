@@ -1,0 +1,59 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+.venv/
+ENV/
+env/
+*.egg-info/
+dist/
+build/
+
+# Logs
+*.log
+index*.log
+ultra*.log
+sequential*.log
+remaining*.log
+/tmp/index_*.log
+
+# Temporary files
+*.tmp
+*.swp
+*.swo
+*~
+*.bak
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test artifacts (generated)
+test_*.json
+ground_truth_*.json
+queries_sample.json
+
+# Benchmark results (optional - uncomment to ignore)
+# benchmarks/results/*.json
+
+# Secrets (never commit!)
+.env
+.env.*
+*.pem
+*.key
+secrets.json
+
+# Local config overrides
+ast_rag_config.local.json
+config.local.json
+
+# Archive (not for publication)
+docs/archive/

@@ -1,0 +1,17 @@
+{
+  "id": "semantic_001",
+  "category": "search",
+  "task": "Semantic search for API classes",
+  "question": "Find API interface classes",
+  "expected_tool": "search_semantic",
+  "expected_params": {
+    "query": "API interface",
+    "limit": 20
+  },
+  "ground_truth_file": "ground_truth/semantic_001.json",
+  "evaluation": {
+    "min_precision": 0.8,
+    "min_recall": 0.8,
+    "max_time_seconds": 3.0
+  }
+}

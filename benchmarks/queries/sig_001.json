@@ -1,0 +1,17 @@
+{
+  "id": "sig_001",
+  "category": "search",
+  "task": "Search functions by signature",
+  "question": "Find all main functions",
+  "expected_tool": "search_by_signature",
+  "expected_params": {
+    "signature": "*main*",
+    "limit": 20
+  },
+  "ground_truth_file": "ground_truth/sig_001.json",
+  "evaluation": {
+    "min_precision": 0.9,
+    "min_recall": 0.8,
+    "max_time_seconds": 5.0
+  }
+}

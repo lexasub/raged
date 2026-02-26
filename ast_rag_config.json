@@ -1,0 +1,21 @@
+{
+  "neo4j": {
+    "uri": "bolt://192.168.2.109:7687",
+    "user": "neo4j",
+    "password": "password",
+    "connection_timeout": 30,
+    "max_connection_pool_size": 50
+  },
+  "qdrant": {
+    "url": "http://192.168.2.109:6333",
+    "collection_name": "ast_rag_nodes",
+    "timeout": 60
+  },
+  "embedding": {
+    "model_name": "bge-m3",
+    "remote_url": "http://192.168.2.6:1113/v1/embeddings",
+    "dimension": 1024,
+    "remote_batch_size": 32,
+    "timeout": 120
+  }
+}

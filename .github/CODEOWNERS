@@ -1,0 +1,22 @@
+# Code Owners for AST-RAG
+# https://help.github.com/articles/about-codeowners/
+
+# Default owners for the entire repository
+* @lexasub
+
+# Core modules
+ast_rag/ast_parser.py @lexasub
+ast_rag/ast_rag_api.py @lexasub
+ast_rag/cli.py @lexasub
+ast_rag/embeddings.py @lexasub
+
+# Tests
+tests/ @lexasub
+benchmarks/ @lexasub
+
+# Documentation
+docs/ @lexasub
+*.md @lexasub
+
+# GitHub Actions
+.github/workflows/ @lexasub
