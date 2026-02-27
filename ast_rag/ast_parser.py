@@ -83,6 +83,15 @@ class ParserManager:
         self._languages: dict[str, Language] = {}
         self._parsers: dict[str, Parser] = {}
         self._compiled_queries: dict[str, dict[str, object]] = {}
+        # ------------------------------------------------------------------
+        # Parse-tree cache
+        # Key:   absolute file path (str)
+        # Value: (sha256_hex_of_source, Tree)
+        # Invalidated automatically when source content changes.
+        # ------------------------------------------------------------------
+        self._tree_cache: dict[str, tuple[str, Tree]] = {}
+        self._cache_hits: int = 0
+        self._cache_misses: int = 0
         self._init_languages()
 
     def _init_languages(self) -> None:
@@ -121,6 +130,11 @@ class ParserManager:
     ) -> Optional[Tree]:
         """Parse a source file and return a tree-sitter Tree.
 
+        Results are cached by content hash so unchanged files are never
+        re-parsed.  Pass ``old_tree`` to enable incremental parsing; the
+        cache entry is refreshed with the new tree after an incremental
+        parse.
+
         Args:
             file_path: Absolute or relative path to the file.
             old_tree:  Previous Tree for incremental parsing, if available.
@@ -132,20 +146,80 @@ class ParserManager:
         lang = self.detect_language(file_path)
         if lang is None:
             return None
-        parser = self._parsers[lang]
+
+        # Normalise to absolute path so cache keys are stable regardless of
+        # how callers pass the path (relative vs absolute).
+        abs_path = os.path.abspath(file_path)
+
+        # Read source bytes exactly once.
         if source is None:
             try:
-                with open(file_path, "rb") as fh:
+                with open(abs_path, "rb") as fh:
                     source = fh.read()
             except OSError as exc:
                 logger.error("Cannot read '%s': %s", file_path, exc)
                 return None
-        # Incremental parse when old tree is available
+
+        # Compute a cheap content fingerprint.
+        content_hash = hashlib.sha256(source).hexdigest()
+
+        # --- Cache look-up (skip when incremental parse is requested) ---
+        # When old_tree is supplied the caller explicitly wants an incremental
+        # re-parse, so we honour that and refresh the cache slot.
+        if old_tree is None:
+            cached = self._tree_cache.get(abs_path)
+            if cached is not None:
+                stored_hash, cached_tree = cached
+                if stored_hash == content_hash:
+                    self._cache_hits += 1
+                    logger.debug("parse_file cache HIT  : %s", file_path)
+                    return cached_tree
+
+        # --- Parse (full or incremental) ---
+        parser = self._parsers[lang]
         if old_tree is not None:
             tree = parser.parse(source, old_tree)
         else:
             tree = parser.parse(source)
+
+        # Store / refresh cache entry.
+        self._tree_cache[abs_path] = (content_hash, tree)
+        self._cache_misses += 1
+        logger.debug("parse_file cache MISS : %s", file_path)
         return tree
+
+    # ------------------------------------------------------------------
+    # Cache management helpers
+    # ------------------------------------------------------------------
+
+    def clear_tree_cache(self) -> None:
+        """Evict all cached parse trees.
+
+        Useful after a bulk re-index or when memory pressure requires
+        releasing large tree objects.
+        """
+        self._tree_cache.clear()
+        logger.debug("parse_file cache cleared")
+
+    def tree_cache_stats(self) -> dict:
+        """Return a snapshot of cache performance counters.
+
+        Returns::
+
+            {
+                'size':     int,    # number of cached trees
+                'hits':     int,    # total cache hits since creation
+                'misses':   int,    # total cache misses since creation
+                'hit_rate': float,  # hits / (hits + misses), or 0.0
+            }
+        """
+        total = self._cache_hits + self._cache_misses
+        return {
+            "size": len(self._tree_cache),
+            "hits": self._cache_hits,
+            "misses": self._cache_misses,
+            "hit_rate": self._cache_hits / total if total else 0.0,
+        }
 
     # ------------------------------------------------------------------
     # Node extraction
