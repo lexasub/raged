@@ -1,13 +1,9 @@
 """
-test_ast_cache.py - Unit tests for the ParserManager parse-tree cache.
+test_ast_cache.py - Tests for ParseCache (unit) and ParserManager cache integration.
 
-Tests:
-    1. Cache HIT:  same file, same content → second call returns identical Tree object.
-    2. Cache MISS: content changes → second call returns a new Tree object.
-    3. Cache MISS: repeated source bytes supplied by caller.
-    4. clear_tree_cache() evicts all entries.
-    5. tree_cache_stats() returns expected structure and sensible values.
-    6. Incremental parse (old_tree supplied) always reparsed, cache refreshed.
+Structure:
+    TestParseCacheUnit          - ParseCache in isolation (pure unit tests)
+    TestParserManagerIntegration - ParserManager delegating to ParseCache
 """
 
 from __future__ import annotations
@@ -17,11 +13,11 @@ import tempfile
 from pathlib import Path
 
 import pytest
-
-# Allow running from repo root or from the raged/ sub-directory.
 import sys
+
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from ast_rag.parse_cache import ParseCache
 from ast_rag.ast_parser import ParserManager
 
 
@@ -29,130 +25,133 @@ from ast_rag.ast_parser import ParserManager
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _make_tmp_py(content: bytes) -> str:
-    """Create a temporary .py file with *content* and return its path."""
-    fh = tempfile.NamedTemporaryFile(suffix=".py", delete=False, mode="wb")
+def _tmp(suffix: str, content: bytes) -> str:
+    fh = tempfile.NamedTemporaryFile(suffix=suffix, delete=False, mode="wb")
     fh.write(content)
     fh.close()
     return fh.name
 
 
-def _make_tmp_java(content: bytes) -> str:
-    """Create a temporary .java file with *content* and return its path."""
-    fh = tempfile.NamedTemporaryFile(suffix=".java", delete=False, mode="wb")
-    fh.write(content)
-    fh.close()
-    return fh.name
+# ===========================================================================
+# Unit tests: ParseCache in complete isolation (no ParserManager, no tree-sitter)
+# ===========================================================================
+
+class TestParseCacheUnit:
+    """Test ParseCache directly without involving any parsing."""
+
+    def test_get_returns_none_on_empty_cache(self):
+        cache = ParseCache()
+        assert cache.get("/some/file.py", b"x=1") is None
+
+    def test_put_then_get_same_source_returns_value(self):
+        cache = ParseCache()
+        sentinel = object()          # stand-in for a Tree
+        cache._store["/f.py"] = (ParseCache.hash_source(b"x=1"), sentinel)
+        result = cache.get("/f.py", b"x=1")
+        assert result is sentinel
+
+    def test_get_returns_none_when_hash_mismatch(self):
+        cache = ParseCache()
+        sentinel = object()
+        cache._store["/f.py"] = (ParseCache.hash_source(b"x=1"), sentinel)
+        # Different source bytes → stale hash
+        assert cache.get("/f.py", b"x=999") is None
+
+    def test_put_overwrites_stale_entry(self):
+        cache = ParseCache()
+        old = object()
+        new = object()
+        cache._store["/f.py"] = (ParseCache.hash_source(b"old"), old)
+        cache.put("/f.py", b"new", new)
+        result = cache.get("/f.py", b"new")
+        assert result is new
+
+    def test_evict_removes_entry(self):
+        cache = ParseCache()
+        sentinel = object()
+        cache._store["/f.py"] = (ParseCache.hash_source(b"x"), sentinel)
+        cache.evict("/f.py")
+        assert cache.get("/f.py", b"x") is None
+
+    def test_evict_nonexistent_key_is_safe(self):
+        cache = ParseCache()
+        cache.evict("/doesnt/exist.py")   # should not raise
+
+    def test_clear_empties_store(self):
+        cache = ParseCache()
+        cache._store["/a.py"] = (ParseCache.hash_source(b"a"), object())
+        cache._store["/b.py"] = (ParseCache.hash_source(b"b"), object())
+        cache.clear()
+        assert len(cache._store) == 0
+
+    def test_stats_structure_on_fresh_cache(self):
+        cache = ParseCache()
+        s = cache.stats()
+        assert set(s.keys()) == {"size", "hits", "misses", "hit_rate"}
+        assert s["size"] == 0
+        assert s["hits"] == 0
+        assert s["misses"] == 0
+        assert s["hit_rate"] == 0.0
+
+    def test_stats_hit_rate_calculation(self):
+        cache = ParseCache()
+        sentinel = object()
+        cache._store["/f.py"] = (ParseCache.hash_source(b"src"), sentinel)
+        cache.get("/f.py", b"src")   # HIT
+        cache.get("/f.py", b"other") # MISS (hash mismatch)
+        s = cache.stats()
+        assert s["hits"] == 1
+        assert s["misses"] == 1
+        assert s["hit_rate"] == pytest.approx(0.5)
+
+    def test_hash_source_is_deterministic(self):
+        h1 = ParseCache.hash_source(b"hello")
+        h2 = ParseCache.hash_source(b"hello")
+        assert h1 == h2
+
+    def test_hash_source_differs_on_different_input(self):
+        assert ParseCache.hash_source(b"a") != ParseCache.hash_source(b"b")
 
 
-# ---------------------------------------------------------------------------
-# Tests
-# ---------------------------------------------------------------------------
+# ===========================================================================
+# Integration tests: ParserManager delegating correctly to ParseCache
+# ===========================================================================
 
+class TestParserManagerIntegration:
+    """Verify ParserManager delegates to ParseCache (no inline cache logic)."""
 
-class TestParseTreeCacheHit:
-    """Second parse of an unchanged file must return the cached Tree."""
-
-    def test_cache_hit_same_content_python(self):
-        path = _make_tmp_py(b"def hello():\n    return 42\n")
+    def test_parse_file_hit_returns_same_tree(self):
+        path = _tmp(".py", b"def hello(): pass\n")
         try:
             pm = ParserManager()
             t1 = pm.parse_file(path)
             t2 = pm.parse_file(path)
-            assert t1 is t2, "Expected the same Tree object on cache hit"
-            stats = pm.tree_cache_stats()
-            assert stats["hits"] == 1
-            assert stats["misses"] == 1
-            assert stats["size"] == 1
-            assert stats["hit_rate"] == pytest.approx(0.5)
-        finally:
-            os.unlink(path)
-
-    def test_cache_hit_multiple_calls(self):
-        path = _make_tmp_py(b"x = 1\n")
-        try:
-            pm = ParserManager()
-            t1 = pm.parse_file(path)
-            t2 = pm.parse_file(path)
-            t3 = pm.parse_file(path)
-            assert t1 is t2
-            assert t1 is t3
-            stats = pm.tree_cache_stats()
-            assert stats["hits"] == 2
-            assert stats["misses"] == 1
-        finally:
-            os.unlink(path)
-
-
-class TestParseTreeCacheMiss:
-    """Parsing a file whose content has changed must produce a fresh Tree."""
-
-    def test_cache_invalidated_on_content_change(self):
-        path = _make_tmp_py(b"x = 1\n")
-        try:
-            pm = ParserManager()
-            t1 = pm.parse_file(path)
-
-            # Modify the file in-place.
-            with open(path, "wb") as fh:
-                fh.write(b"x = 99\ny = x + 1\n")
-
-            t2 = pm.parse_file(path)
-            assert t1 is not t2, "Expected a new Tree after content change"
-            stats = pm.tree_cache_stats()
-            assert stats["misses"] == 2
-            assert stats["size"] == 1  # still only one slot (same path)
-        finally:
-            os.unlink(path)
-
-    def test_cache_miss_different_files(self):
-        path_a = _make_tmp_py(b"a = 1\n")
-        path_b = _make_tmp_py(b"b = 2\n")
-        try:
-            pm = ParserManager()
-            pm.parse_file(path_a)
-            pm.parse_file(path_b)
-            stats = pm.tree_cache_stats()
-            assert stats["size"] == 2
-            assert stats["misses"] == 2
-            assert stats["hits"] == 0
-        finally:
-            os.unlink(path_a)
-            os.unlink(path_b)
-
-
-class TestSourceSuppliedBytesCaching:
-    """When caller supplies source bytes, cache key is still the file path + hash."""
-
-    def test_source_bytes_cache_hit(self):
-        path = _make_tmp_py(b"pass\n")
-        try:
-            pm = ParserManager()
-            src = b"pass\n"
-            t1 = pm.parse_file(path, source=src)
-            t2 = pm.parse_file(path, source=src)
             assert t1 is t2
             assert pm.tree_cache_stats()["hits"] == 1
         finally:
             os.unlink(path)
 
-    def test_source_bytes_changed_is_cache_miss(self):
-        path = _make_tmp_py(b"pass\n")
+    def test_parse_file_miss_on_content_change(self):
+        path = _tmp(".py", b"x = 1\n")
         try:
             pm = ParserManager()
-            t1 = pm.parse_file(path, source=b"pass\n")
-            t2 = pm.parse_file(path, source=b"x = 1\n")  # different bytes
+            t1 = pm.parse_file(path)
+            with open(path, "wb") as f:
+                f.write(b"x = 99\n")
+            t2 = pm.parse_file(path)
             assert t1 is not t2
             assert pm.tree_cache_stats()["misses"] == 2
         finally:
             os.unlink(path)
 
+    def test_custom_cache_injected_via_constructor(self):
+        """ParserManager should use a caller-supplied ParseCache instance."""
+        custom_cache = ParseCache()
+        pm = ParserManager(cache=custom_cache)
+        assert pm._cache is custom_cache
 
-class TestClearTreeCache:
-    """clear_tree_cache() must evict all entries."""
-
-    def test_clear_resets_size(self):
-        path = _make_tmp_py(b"a = 1\n")
+    def test_clear_tree_cache_delegates(self):
+        path = _tmp(".py", b"pass\n")
         try:
             pm = ParserManager()
             pm.parse_file(path)
@@ -162,51 +161,30 @@ class TestClearTreeCache:
         finally:
             os.unlink(path)
 
-    def test_after_clear_next_parse_is_miss(self):
-        path = _make_tmp_py(b"a = 1\n")
+    def test_tree_cache_stats_delegates(self):
+        pm = ParserManager()
+        stats = pm.tree_cache_stats()
+        assert "size" in stats and "hits" in stats
+
+    def test_incremental_parse_refreshes_cache(self):
+        path = _tmp(".py", b"x = 1\n")
         try:
             pm = ParserManager()
             t1 = pm.parse_file(path)
-            pm.clear_tree_cache()
-            t2 = pm.parse_file(path)
-            # t2 is a freshly parsed tree (may or may not be `is t1`, but cache was cleared)
-            assert pm.tree_cache_stats()["misses"] == 2
+            t2 = pm.parse_file(path, old_tree=t1)  # incremental
+            # plain call now should return the refreshed entry (t2)
+            t3 = pm.parse_file(path)
+            assert t3 is t2
         finally:
             os.unlink(path)
 
-
-class TestCacheStats:
-    """tree_cache_stats() must always return a well-formed dict."""
-
-    def test_fresh_manager_stats(self):
-        pm = ParserManager()
-        stats = pm.tree_cache_stats()
-        assert set(stats.keys()) == {"size", "hits", "misses", "hit_rate"}
-        assert stats["size"] == 0
-        assert stats["hits"] == 0
-        assert stats["misses"] == 0
-        assert stats["hit_rate"] == 0.0
-
-    def test_hit_rate_denominator_never_zero(self):
-        """hit_rate should be 0.0 when no parses have happened yet."""
-        pm = ParserManager()
-        assert pm.tree_cache_stats()["hit_rate"] == 0.0
-
-
-class TestIncrementalParse:
-    """When old_tree is supplied, parser re-parses but still refreshes cache slot."""
-
-    def test_incremental_parse_updates_cache(self):
-        path = _make_tmp_py(b"x = 1\n")
+    def test_source_supplied_by_caller_is_cached(self):
+        path = _tmp(".py", b"pass\n")
         try:
             pm = ParserManager()
-            t1 = pm.parse_file(path)
-            # Hand old_tree back to trigger incremental parse path.
-            t2 = pm.parse_file(path, old_tree=t1)
-            # Incremental parse must not return the old tree object.
-            # Cache slot for this path should now hold t2.
-            # A subsequent plain call with same content hits the cache.
-            t3 = pm.parse_file(path)
-            assert t3 is t2  # t2 is now cached
+            src = b"pass\n"
+            t1 = pm.parse_file(path, source=src)
+            t2 = pm.parse_file(path, source=src)
+            assert t1 is t2
         finally:
             os.unlink(path)
