@@ -105,6 +105,21 @@ class JSONFormatter(OutputFormatter):
 class HumanFormatter(OutputFormatter):
     """Human-readable output using Rich (table format)."""
 
+    # Default color mapping (structured for future configurability)
+    COLOR_MAP = {
+        "class": "blue",
+        "function": "green",
+        "method": "cyan",
+        "field": "yellow",
+    }
+
+    def _colorize_kind(self, kind: str) -> str:
+        """Apply color styling to node kind based on COLOR_MAP."""
+        color = self.COLOR_MAP.get(kind.lower())
+        if not color:
+            return kind
+        return f"[{color}]{kind}[/{color}]"
+
     def format_search_results(self, results: list[SearchResult], query: str) -> None:
         table = Table(
             "Score",
@@ -119,7 +134,7 @@ class HumanFormatter(OutputFormatter):
             n = r.node
             table.add_row(
                 f"{r.score:.3f}",
-                n.kind.value,
+                self._colorize_kind(n.kind.value),
                 n.lang.value,
                 n.qualified_name,
                 n.file_path,
@@ -132,14 +147,18 @@ class HumanFormatter(OutputFormatter):
     ) -> None:
         for node in nodes:
             console.print(
-                f"[bold]{node.kind.value}[/bold] [cyan]{node.qualified_name}[/cyan]\n"
+                f"{self._colorize_kind(node.kind.value)} "
+                f"[bold]{node.qualified_name}[/bold]\n"
                 f"  File:      {node.file_path}\n"
                 f"  Lines:     {node.start_line}–{node.end_line}\n"
                 f"  Language:  {node.lang.value}\n"
                 + (f"  Signature: {node.signature}\n" if node.signature else "")
             )
+
             if snippet and api:
-                code = api.get_code_snippet(node.file_path, node.start_line, node.end_line)
+                code = api.get_code_snippet(
+                    node.file_path, node.start_line, node.end_line
+                )
                 if code:
                     lang_map = {
                         "java": "java",
@@ -159,11 +178,20 @@ class HumanFormatter(OutputFormatter):
 
     def format_callers(self, qualified_name: str, nodes: list[ASTNode]) -> None:
         table = Table(
-            "Kind", "Lang", "Qualified Name", "File", "Line", title=f"Callers of {qualified_name}"
+            "Kind",
+            "Lang",
+            "Qualified Name",
+            "File",
+            "Line",
+            title=f"Callers of {qualified_name}",
         )
         for n in nodes:
             table.add_row(
-                n.kind.value, n.lang.value, n.qualified_name, n.file_path, str(n.start_line)
+                self._colorize_kind(n.kind.value),
+                n.lang.value,
+                n.qualified_name,
+                n.file_path,
+                str(n.start_line),
             )
         console.print(table)
 
