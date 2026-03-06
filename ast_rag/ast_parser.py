@@ -30,6 +30,7 @@ from ast_rag.models import (
     NodeKind, EdgeKind, Language as Lang,
 )
 from ast_rag.language_queries import LANGUAGE_QUERIES
+from ast_rag.parse_cache import ParseCache
 
 logger = logging.getLogger(__name__)
 
@@ -79,10 +80,12 @@ class ParserManager:
         edges = pm.extract_edges(tree, nodes, "/path/to/Foo.java", "java")
     """
 
-    def __init__(self) -> None:
+    def __init__(self, cache: Optional[ParseCache] = None) -> None:
         self._languages: dict[str, Language] = {}
         self._parsers: dict[str, Parser] = {}
         self._compiled_queries: dict[str, dict[str, object]] = {}
+        # Delegate all cache concerns to ParseCache (swappable backend).
+        self._cache: ParseCache = cache if cache is not None else ParseCache()
         self._init_languages()
 
     def _init_languages(self) -> None:
@@ -121,6 +124,10 @@ class ParserManager:
     ) -> Optional[Tree]:
         """Parse a source file and return a tree-sitter Tree.
 
+        Results are cached by content hash so unchanged files are never
+        re-parsed within the same process.  Pass ``old_tree`` to enable
+        incremental parsing; the cache entry is refreshed afterwards.
+
         Args:
             file_path: Absolute or relative path to the file.
             old_tree:  Previous Tree for incremental parsing, if available.
@@ -132,20 +139,45 @@ class ParserManager:
         lang = self.detect_language(file_path)
         if lang is None:
             return None
-        parser = self._parsers[lang]
+
+        abs_path = os.path.abspath(file_path)
+
+        # Read source bytes once so both the cache check and the parser use
+        # the same bytes.
         if source is None:
             try:
-                with open(file_path, "rb") as fh:
+                with open(abs_path, "rb") as fh:
                     source = fh.read()
             except OSError as exc:
                 logger.error("Cannot read '%s': %s", file_path, exc)
                 return None
-        # Incremental parse when old tree is available
-        if old_tree is not None:
-            tree = parser.parse(source, old_tree)
-        else:
-            tree = parser.parse(source)
+
+        # Check cache — skip when incremental parse is explicitly requested
+        # (old_tree supplied) to honour the caller's intent.
+        if old_tree is None:
+            cached = self._cache.get(abs_path, source)
+            if cached is not None:
+                return cached
+
+        # Parse (full or incremental).
+        parser = self._parsers[lang]
+        tree = parser.parse(source, old_tree) if old_tree is not None else parser.parse(source)
+
+        # Persist result in cache.
+        self._cache.put(abs_path, source, tree)
         return tree
+
+    # ------------------------------------------------------------------
+    # Cache management — thin delegation to ParseCache
+    # ------------------------------------------------------------------
+
+    def clear_tree_cache(self) -> None:
+        """Evict all cached parse trees (delegates to ParseCache.clear)."""
+        self._cache.clear()
+
+    def tree_cache_stats(self) -> dict:
+        """Return cache performance counters (delegates to ParseCache.stats)."""
+        return self._cache.stats()
 
     # ------------------------------------------------------------------
     # Node extraction

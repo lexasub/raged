@@ -1,4 +1,8 @@
 {
+  "parse_cache": {
+    "max_entries": 5000,
+    "max_size_mb": 512
+  },
   "neo4j": {
     "uri": "bolt://192.168.2.109:7687",
     "user": "neo4j",
