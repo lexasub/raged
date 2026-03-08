@@ -265,6 +265,83 @@ ast-rag evaluate --all
 
 ---
 
+## 📚 Real-World Code Examples
+
+### Example 1: Finding All Usages of a Function
+
+**Scenario:** You need to refactor `processRequest()` — understand where it's called and what depends on it.
+
+```bash
+# 1. Find all references (usages)
+ast-rag refs processRequest
+
+# 2. Find callers with call depth (who calls it)
+ast-rag callers processRequest --depth 2
+
+# 3. Get the function code for review
+ast-rag goto processRequest --snippet
+
+# 4. Check impact in codebase
+ast-rag query "processRequest" --limit 10
+```
+
+**Result:** You see all files and line numbers where `processRequest()` is used, helping you plan the refactoring safely.
+
+---
+
+### Example 2: Understanding a New Codebase
+
+**Scenario:** You're joining a project and need to understand the architecture quickly.
+
+```bash
+# 1. Find entry point (main function, init, or app class)
+ast-rag query "main initialization entry point" --limit 5
+
+# 2. Get the entry point code
+ast-rag goto <found_name> --snippet
+
+# 3. Find what it calls (call graph)
+ast-rag callers <entry_point> --depth 2
+
+# 4. Find key dependencies
+ast-rag query "database connection manager" --limit 5
+ast-rag query "HTTP request handling" --limit 5
+
+# 5. Explore main classes
+ast-rag query "class Controller Service Handler" --limit 10
+```
+
+**Result:** You quickly map out the system's structure, main entry points, and key components.
+
+---
+
+### Example 3: Preparing for Refactoring
+
+**Scenario:** You want to rename `UserService` to `UserManager` and need to ensure nothing breaks.
+
+```bash
+# 1. Find all references to the class
+ast-rag refs UserService --kind Class
+
+# 2. Find all callers (who uses it)
+ast-rag callers UserService --depth 3
+
+# 3. Check imports (how it's imported)
+ast-rag query "import UserService" --limit 10
+
+# 4. Get full context of dependencies
+ast-rag goto UserService --snippet
+
+# 5. Plan your changes
+# - Note all files that need updates
+# - Verify no external APIs depend on old name
+# - Check for circular dependencies
+```
+
+**Result:** You have a complete picture of impact, preventing breaking changes.
+
+---
+
 ## 📚 Next Steps
 
 1. **Learn CLI commands** — `ast-rag --help`
