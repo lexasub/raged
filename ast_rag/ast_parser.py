@@ -16,7 +16,7 @@ import hashlib
 import logging
 import os
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Union
 
 import tree_sitter_cpp as tscpp
 import tree_sitter_java as tsjava
@@ -30,6 +30,7 @@ from ast_rag.models import (
     NodeKind, EdgeKind, Language as Lang,
 )
 from ast_rag.language_queries import LANGUAGE_QUERIES
+from ast_rag.parse_cache import ParseCache, SQLiteParseCache
 
 logger = logging.getLogger(__name__)
 
@@ -77,12 +78,41 @@ class ParserManager:
         tree = pm.parse_file("/path/to/Foo.java")
         nodes = pm.extract_nodes(tree, "/path/to/Foo.java", "java")
         edges = pm.extract_edges(tree, nodes, "/path/to/Foo.java", "java")
+
+    Backend selection
+    -----------------
+    Pass an explicit ``cache=`` instance *or* let the factory choose based on
+    ``config["parse_cache"]["persistence_enabled"]``:
+
+        # In-memory (default)
+        pm = ParserManager()
+
+        # SQLite (persistent across restarts)
+        pm = ParserManager(config={"parse_cache": {"persistence_enabled": True}})
+
+        # Explicit injection (useful in tests)
+        pm = ParserManager(cache=SQLiteParseCache("/tmp/test.sqlite"))
     """
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        cache: Optional[Union[ParseCache, SQLiteParseCache]] = None,
+        config: Optional[dict] = None,
+    ) -> None:
         self._languages: dict[str, Language] = {}
         self._parsers: dict[str, Parser] = {}
         self._compiled_queries: dict[str, dict[str, object]] = {}
+        # Factory: caller-supplied cache > config-driven > default in-memory.
+        if cache is not None:
+            self._cache: Union[ParseCache, SQLiteParseCache] = cache
+        else:
+            pc_cfg: dict = (config or {}).get("parse_cache", {})
+            if pc_cfg.get("persistence_enabled", False):
+                db_path = pc_cfg.get("db_path", ".ast_rag_parse_cache.sqlite")
+                self._cache = SQLiteParseCache(db_path)
+                logger.info("ParserManager: using SQLiteParseCache at %s", db_path)
+            else:
+                self._cache = ParseCache()
         self._init_languages()
 
     def _init_languages(self) -> None:
@@ -118,34 +148,82 @@ class ParserManager:
         file_path: str,
         old_tree: Optional[Tree] = None,
         source: Optional[bytes] = None,
+        resolve: bool = False,
     ) -> Optional[Tree]:
         """Parse a source file and return a tree-sitter Tree.
+
+        Results are cached by content hash so unchanged files are never
+        re-parsed within the same process.  Pass ``old_tree`` to enable
+        incremental parsing; the cache entry is refreshed afterwards.
+
+        The cache layer returns a ``LazyTree`` proxy.  For most callers this is
+        transparent — attribute access is delegated to the underlying ``Tree``.
+        Worker processes that cross pickle boundaries (e.g. ``ProcessPoolExecutor``)
+        must pass ``resolve=True`` to get a plain ``Tree`` object back.
 
         Args:
             file_path: Absolute or relative path to the file.
             old_tree:  Previous Tree for incremental parsing, if available.
             source:    Pre-read bytes, to avoid re-reading the file.
+            resolve:   If ``True``, force eager resolution and return a plain
+                       ``Tree`` (required for worker/subprocess use).
 
         Returns:
-            A tree-sitter Tree, or None on failure.
+            A tree-sitter ``Tree`` (or ``LazyTree`` proxy when ``resolve=False``),
+            or ``None`` on failure.
         """
         lang = self.detect_language(file_path)
         if lang is None:
             return None
-        parser = self._parsers[lang]
+
+        abs_path = os.path.abspath(file_path)
+
+        # Read source bytes once so both the cache check and the parser use
+        # the same bytes.
         if source is None:
             try:
-                with open(file_path, "rb") as fh:
+                with open(abs_path, "rb") as fh:
                     source = fh.read()
             except OSError as exc:
                 logger.error("Cannot read '%s': %s", file_path, exc)
                 return None
-        # Incremental parse when old tree is available
-        if old_tree is not None:
-            tree = parser.parse(source, old_tree)
-        else:
-            tree = parser.parse(source)
+
+        # Check cache — skip when incremental parse is explicitly requested
+        # (old_tree supplied) to honour the caller's intent.
+        #
+        # The loader lambda is provided here so ParseCache stays agnostic of
+        # tree-sitter.  The in-memory backend ignores it (tree already stored);
+        # SQLiteParseCache wraps it in a LazyTree for deferred re-parsing.
+        if old_tree is None:
+            _lang = lang  # capture for lambda closure
+            _src = source
+            lazy = self._cache.get(
+                abs_path,
+                source,
+                loader=lambda: self._parsers[_lang].parse(_src),
+            )
+            if lazy is not None:
+                return lazy.resolve() if resolve else lazy  # type: ignore[return-value]
+
+        # Parse (full or incremental).
+        parser = self._parsers[lang]
+        tree = parser.parse(source, old_tree) if old_tree is not None else parser.parse(source)
+
+        # Persist result in cache.
+        self._cache.put(abs_path, source, tree)
         return tree
+
+    # ------------------------------------------------------------------
+    # Cache management — thin delegation to ParseCache
+    # ------------------------------------------------------------------
+
+    def clear_tree_cache(self) -> None:
+        """Evict all cached parse trees (delegates to ParseCache.clear)."""
+        self._cache.clear()
+
+    def tree_cache_stats(self) -> dict:
+        """Return cache performance counters (delegates to ParseCache.stats)."""
+        return self._cache.stats()
 
     # ------------------------------------------------------------------
     # Node extraction
