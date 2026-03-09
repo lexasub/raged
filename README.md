@@ -1,7 +1,5 @@
 # AST-RAG — Code Analysis & Navigation System
 
-Context-aware code intelligence system for AI agents and developers. Provides semantic code search, definition lookup, call graph analysis, and codebase navigation powered by AST parsing (Tree-sitter), graph database (Neo4j), and vector embeddings (Qdrant).
-
 **AST-RAG** parses code into AST (via Tree-sitter), builds a graph in **Neo4j**, and indexes semantic embeddings in **Qdrant** (bge-m3).
 
 ## 🚀 Features
@@ -175,22 +173,6 @@ ast-rag workspace . --apply
 
 ## Additionaly docs
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/lexasub/raged)
-
-## 🚧 Roadmap
-
-Planned features and improvements:
-
-| Feature | Status | Description |
-|---------|--------|-------------|
-| **Code Summaries** | 🔜 Planned | Generate AI-powered summaries for functions/classes |
-| **Refactoring Hints** | 🔜 Planned | Detect code smells and suggest improvements |
-| **More Languages** | 🔜 Planned | Go, C#, Kotlin with full AST support |
-| **IDE Integration** | 🔄 In Progress | MCP, skills, CLI for OpenCode, Kilocode, Claude Code, Cursor |
-| **Incremental Indexing** | ✅ Done | Git-based and filesystem watcher updates (improving for large codebases) |
-| **Rust Rewrite** | 🔜 Planned | Full rewrite in Rust for performance, type safety, and easier integration |
-| **AST Patching** | 🔜 Future Project | Separate project for generating code patches from AST |
-| **Multi-Project Support** | 🔜 Planned | Work across multiple related projects (microservices, monorepos) |
-| **Vector DB Flexibility** | 🔜 Planned | Support for alternative vector stores (Chroma, etc.) and distance metrics |
 
 ## 📝 License
 
