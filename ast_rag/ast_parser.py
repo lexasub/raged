@@ -28,6 +28,7 @@ from tree_sitter import Language, Parser, Query, QueryCursor, Tree, Node
 from ast_rag.models import (
     ASTNode,
     ASTEdge,
+    ASTBlock,
     NodeKind,
     EdgeKind,
     Language as Lang,
@@ -593,6 +594,87 @@ class ParserManager:
             edges.extend(rust_edges)
 
         return edges
+
+    # ------------------------------------------------------------------
+    # Block extraction
+    # ------------------------------------------------------------------
+
+    def extract_blocks(
+        self,
+        tree: Tree,
+        nodes: list[ASTNode],
+        file_path: str,
+        lang: str,
+        source: Optional[bytes] = None,
+        commit_hash: str = "INIT",
+    ) -> tuple[list[ASTBlock], list[ASTEdge]]:
+        """Extract code blocks from within functions/methods.
+
+        Blocks are nested control flow structures:
+        - Control flow: if, for, while, match/switch
+        - Exception handling: try/catch/finally
+        - Scope blocks: with (Python), using (C#)
+        - Anonymous functions: lambda, closure
+
+        Args:
+            tree: Parsed tree-sitter Tree
+            nodes: List of ASTNode (functions/methods) to extract blocks from
+            file_path: Source file path
+            lang: Language key (python, rust, etc.)
+            source: Source code bytes
+            commit_hash: Version hash for MVCC
+
+        Returns:
+            Tuple of (blocks, edges) where edges are CONTAINS_BLOCK relationships
+
+        Note:
+            Currently supports Python and Rust. Other languages return empty lists.
+        """
+        from ast_rag.models import ASTBlock, ASTEdge, EdgeKind, NodeKind
+
+        # Only extract blocks for supported languages
+        if lang not in ("python", "rust"):
+            return [], []
+
+        if source is None:
+            try:
+                with open(file_path, "rb") as fh:
+                    source = fh.read()
+            except OSError:
+                return [], []
+
+        # Filter to only function/method nodes
+        function_nodes = [
+            n for n in nodes
+            if n.kind in (NodeKind.FUNCTION, NodeKind.METHOD, NodeKind.CONSTRUCTOR, NodeKind.DESTRUCTOR)
+        ]
+
+        if not function_nodes:
+            return [], []
+
+        # Use BlockExtractor
+        from ast_rag.block_extractor import BlockExtractor
+        extractor = BlockExtractor()
+        blocks = extractor.extract_blocks(tree, source, function_nodes, lang, commit_hash)
+
+        # Create CONTAINS_BLOCK edges
+        edges: list[ASTEdge] = []
+        for block in blocks:
+            edge = ASTEdge(
+                kind=EdgeKind.CONTAINS_BLOCK,
+                from_id=block.parent_function_id,
+                to_id=block.id,
+                label=block.block_type.value,
+                valid_from=commit_hash,
+            )
+            edges.append(edge)
+
+        logger.debug(
+            "Extracted %d blocks and %d CONTAINS_BLOCK edges from %s (%s)",
+            len(blocks), len(edges), file_path, lang
+        )
+
+        return blocks, edges
 
     def _track_virtual_method_dispatch(
         self,

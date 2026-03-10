@@ -21,10 +21,11 @@ from typing import TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:
     import git
+    from tree_sitter import Tree
 
 from neo4j import Driver, Session
 
-from ast_rag.models import ASTNode, ASTEdge, DiffResult
+from ast_rag.models import ASTNode, ASTEdge, DiffResult, ASTBlock
 from ast_rag.graph_schema import (
     batch_upsert_nodes,
     batch_expire_nodes,
@@ -728,3 +729,149 @@ def apply_workspace_diff(
         len(diff.added_nodes) + len(diff.updated_nodes),
     )
     return diff
+
+
+# ---------------------------------------------------------------------------
+# Block extraction and persistence
+# ---------------------------------------------------------------------------
+
+
+def extract_and_store_blocks(
+    driver: Driver,
+    nodes: list[ASTNode],
+    file_path: str,
+    lang: str,
+    source: bytes,
+    tree: Tree,
+    commit_hash: str = "INIT",
+) -> tuple[list[ASTBlock], list[ASTEdge]]:
+    """Extract blocks from function nodes and prepare them for storage.
+
+    Args:
+        driver: Neo4j driver
+        nodes: List of ASTNode (functions/methods) to extract blocks from
+        file_path: Source file path
+        lang: Language key (python, rust, etc.)
+        source: Source code bytes
+        tree: Parsed tree-sitter Tree
+        commit_hash: Version hash for MVCC
+
+    Returns:
+        Tuple of (blocks, edges) where edges are CONTAINS_BLOCK relationships
+    """
+    from ast_rag.block_extractor import BlockExtractor
+    from ast_rag.models import ASTBlock, ASTEdge, EdgeKind
+
+    # Filter to only function/method nodes
+    from ast_rag.models import NodeKind
+    function_nodes = [
+        n for n in nodes
+        if n.kind in (NodeKind.FUNCTION, NodeKind.METHOD, NodeKind.CONSTRUCTOR, NodeKind.DESTRUCTOR)
+    ]
+
+    if not function_nodes:
+        return [], []
+
+    extractor = BlockExtractor()
+    blocks = extractor.extract_blocks(tree, source, function_nodes, lang, commit_hash)
+
+    # Create CONTAINS_BLOCK edges
+    edges: list[ASTEdge] = []
+    for block in blocks:
+        edge = ASTEdge(
+            kind=EdgeKind.CONTAINS_BLOCK,
+            from_id=block.parent_function_id,
+            to_id=block.id,
+            label=block.block_type.value,
+            valid_from=commit_hash,
+        )
+        edges.append(edge)
+
+    logger.debug(
+        "Extracted %d blocks and %d CONTAINS_BLOCK edges from %s",
+        len(blocks), len(edges), file_path
+    )
+
+    return blocks, edges
+
+
+def batch_upsert_blocks(
+    session: Session,
+    blocks: list[ASTBlock],
+    commit_hash: str,
+) -> None:
+    """Batch upsert blocks into Neo4j.
+
+    Args:
+        session: Neo4j session
+        blocks: List of ASTBlock to upsert
+        commit_hash: Version hash
+    """
+    if not blocks:
+        return
+
+    # Convert to property dicts
+    block_props = [b.to_neo4j_props() for b in blocks]
+
+    # Upsert using UNWIND
+    cypher = """
+UNWIND $batch AS props
+MERGE (n:Block {id: props.id})
+SET n += props
+"""
+    session.run(cypher, batch=block_props)
+    logger.debug("Upserted %d blocks", len(blocks))
+
+
+def batch_upsert_block_edges(
+    session: Session,
+    edges: list[ASTEdge],
+) -> None:
+    """Batch upsert CONTAINS_BLOCK edges into Neo4j.
+
+    Args:
+        session: Neo4j session
+        edges: List of CONTAINS_BLOCK edges
+    """
+    if not edges:
+        return
+
+    edge_dicts = [e.to_neo4j_props() for e in edges]
+
+    cypher = """
+UNWIND $batch AS e
+MATCH (a {id: e.from_id})
+MATCH (b {id: e.to_id})
+MERGE (a)-[r:CONTAINS_BLOCK {id: e.id}]->(b)
+SET r += e
+"""
+    session.run(cypher, batch=edge_dicts)
+    logger.debug("Upserted %d CONTAINS_BLOCK edges", len(edges))
+
+
+def expire_blocks_for_function(
+    session: Session,
+    function_id: str,
+    commit_hash: str,
+) -> int:
+    """Expire all blocks belonging to a function.
+
+    Args:
+        session: Neo4j session
+        function_id: ID of the function whose blocks to expire
+        commit_hash: Version hash to mark as expired
+
+    Returns:
+        Number of blocks expired
+    """
+    cypher = """
+MATCH (f)-[r:CONTAINS_BLOCK]->(b:Block)
+WHERE f.id = $function_id AND b.valid_to IS NULL
+SET b.valid_to = $commit_hash
+RETURN count(b) AS expired_count
+"""
+    result = session.run(cypher, function_id=function_id, commit_hash=commit_hash)
+    record = result.single()
+    count = record["expired_count"] if record else 0
+    logger.debug("Expired %d blocks for function %s", count, function_id)
+    return count
