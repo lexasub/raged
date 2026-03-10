@@ -1,0 +1,52 @@
+{
+  "summarizer": {
+    "enabled": true,
+    "llm": {
+      "base_url": "http://localhost:11434/v1",
+      "model": "qwen2.5-coder:14b",
+      "api_key": "ollama",
+      "timeout": 120,
+      "temperature": 0.1
+    },
+    "cache": {
+      "enabled": true,
+      "path": ".ast_rag_summary_cache.json",
+      "max_entries": 1000
+    },
+    "context": {
+      "max_callers": 5,
+      "max_callees": 5,
+      "include_signature": true,
+      "include_source": true
+    },
+    "output": {
+      "default_format": "markdown",
+      "include_metadata": true
+    }
+  },
+  "parse_cache": {
+    "max_entries": 5000,
+    "max_size_mb": 512,
+    "persistence_enabled": false,
+    "db_path": ".ast_rag_parse_cache.sqlite"
+  },
+  "neo4j": {
+    "uri": "bolt://192.168.2.109:7687",
+    "user": "neo4j",
+    "password": "password",
+    "connection_timeout": 30,
+    "max_connection_pool_size": 50
+  },
+  "qdrant": {
+    "url": "http://192.168.2.109:6333",
+    "collection_name": "ast_rag_nodes",
+    "timeout": 60
+  },
+  "embedding": {
+    "model_name": "BAAI/bge-m3",
+    "remote_url": "http://192.168.2.6:1113/v1/embeddings",
+    "dimension": 1024,
+    "remote_batch_size": 32,
+    "timeout": 120
+  }
+}
