@@ -11,6 +11,11 @@ API surface:
 - search_semantic(query, limit) -> list[SearchResult]
 - get_code_snippet(file_path, start_line, end_line) -> str
 - analyze_text(text, limit) -> list[SearchResult]
+- get_blocks_for_function(function_id, block_type, limit) -> list[dict]
+- get_block_source(block_id) -> Optional[str]
+- search_blocks(block_type, lang, min_nesting, limit) -> list[dict]
+- get_lambda_blocks(lang, with_captured_vars, limit) -> list[dict]
+- get_block_statistics(function_id) -> dict
 """
 
 from __future__ import annotations
@@ -1033,3 +1038,264 @@ LIMIT 200
             "from_commit": from_commit,
             "to_commit": to_commit,
         }
+
+    # ------------------------------------------------------------------
+    # Block extraction and queries
+    # ------------------------------------------------------------------
+
+    def get_blocks_for_function(
+        self,
+        function_id: str,
+        block_type: Optional[str] = None,
+        limit: int = 100,
+    ) -> list[dict]:
+        """Get all blocks within a function.
+
+        Args:
+            function_id: ID of the function to get blocks for
+            block_type: Optional filter by block type (if/for/while/try/lambda/with/match/loop)
+            limit: Maximum number of blocks to return
+
+        Returns:
+            List of block dictionaries with full details
+        """
+        type_filter = f"AND b.block_type = $block_type" if block_type else ""
+
+        cypher = f"""
+MATCH (f)-[r:CONTAINS_BLOCK]->(b:Block)
+WHERE f.id = $function_id AND b.valid_to IS NULL
+  {type_filter}
+RETURN b, r.label AS edge_label
+ORDER BY b.start_line
+LIMIT $limit
+"""
+        params = {
+            "function_id": function_id,
+            "limit": limit,
+        }
+        if block_type:
+            params["block_type"] = block_type
+
+        results: list[dict] = []
+        with self._driver.session() as session:
+            for record in session.run(cypher, **params):
+                block_data = dict(record["b"])
+                results.append({
+                    "id": block_data.get("id", ""),
+                    "block_type": block_data.get("block_type", ""),
+                    "name": block_data.get("name", ""),
+                    "parent_function_id": block_data.get("parent_function_id", ""),
+                    "lang": block_data.get("lang", ""),
+                    "file_path": block_data.get("file_path", ""),
+                    "start_line": block_data.get("start_line", 0),
+                    "end_line": block_data.get("end_line", 0),
+                    "start_byte": block_data.get("start_byte", 0),
+                    "end_byte": block_data.get("end_byte", 0),
+                    "nesting_depth": block_data.get("nesting_depth", 1),
+                    "captured_variables": block_data.get("captured_variables", []),
+                    "edge_label": record.get("edge_label", ""),
+                })
+
+        return results
+
+    def get_block_source(
+        self,
+        block_id: str,
+    ) -> Optional[str]:
+        """Get the source code for a specific block.
+
+        Args:
+            block_id: ID of the block
+
+        Returns:
+            Source code string or None if not found
+        """
+        cypher = """
+MATCH (b:Block {id: $block_id})
+WHERE b.valid_to IS NULL
+RETURN b.file_path AS file_path, b.start_line AS start_line, b.end_line AS end_line
+"""
+        with self._driver.session() as session:
+            record = session.run(cypher, block_id=block_id).single()
+            if not record:
+                return None
+
+            file_path = record["file_path"]
+            start_line = record["start_line"]
+            end_line = record["end_line"]
+
+            return self.get_code_snippet(file_path, start_line, end_line)
+
+    def search_blocks(
+        self,
+        block_type: str,
+        lang: Optional[str] = None,
+        min_nesting: int = 1,
+        limit: int = 50,
+    ) -> list[dict]:
+        """Search for blocks by type across the codebase.
+
+        Args:
+            block_type: Type of block to search for (if/for/while/try/lambda/with/match/loop)
+            lang: Optional language filter
+            min_nesting: Minimum nesting depth
+            limit: Maximum results
+
+        Returns:
+            List of block dictionaries
+        """
+        lang_filter = "AND b.lang = $lang" if lang else ""
+
+        cypher = f"""
+MATCH (b:Block)
+WHERE b.block_type = $block_type
+  AND b.valid_to IS NULL
+  AND b.nesting_depth >= $min_nesting
+  {lang_filter}
+RETURN b
+ORDER BY b.nesting_depth DESC, b.start_line
+LIMIT $limit
+"""
+        params = {
+            "block_type": block_type,
+            "min_nesting": min_nesting,
+            "limit": limit,
+        }
+        if lang:
+            params["lang"] = lang
+
+        results: list[dict] = []
+        with self._driver.session() as session:
+            for record in session.run(cypher, **params):
+                block_data = dict(record["b"])
+                results.append({
+                    "id": block_data.get("id", ""),
+                    "block_type": block_data.get("block_type", ""),
+                    "name": block_data.get("name", ""),
+                    "parent_function_id": block_data.get("parent_function_id", ""),
+                    "lang": block_data.get("lang", ""),
+                    "file_path": block_data.get("file_path", ""),
+                    "start_line": block_data.get("start_line", 0),
+                    "end_line": block_data.get("end_line", 0),
+                    "nesting_depth": block_data.get("nesting_depth", 1),
+                    "captured_variables": block_data.get("captured_variables", []),
+                })
+
+        return results
+
+    def get_lambda_blocks(
+        self,
+        lang: Optional[str] = None,
+        with_captured_vars: bool = False,
+        limit: int = 50,
+    ) -> list[dict]:
+        """Get all lambda/closure blocks, optionally filtered by captured variables.
+
+        Args:
+            lang: Optional language filter
+            with_captured_vars: If True, only return lambdas that capture variables
+            limit: Maximum results
+
+        Returns:
+            List of lambda block dictionaries
+        """
+        captured_filter = "AND size(b.captured_variables) > 0" if with_captured_vars else ""
+        lang_filter = "AND b.lang = $lang" if lang else ""
+
+        cypher = f"""
+MATCH (b:Block)
+WHERE b.block_type = 'lambda'
+  AND b.valid_to IS NULL
+  {captured_filter}
+  {lang_filter}
+RETURN b
+ORDER BY size(b.captured_variables) DESC, b.start_line
+LIMIT $limit
+"""
+        params = {"limit": limit}
+        if lang:
+            params["lang"] = lang
+
+        results: list[dict] = []
+        with self._driver.session() as session:
+            for record in session.run(cypher, **params):
+                block_data = dict(record["b"])
+                results.append({
+                    "id": block_data.get("id", ""),
+                    "block_type": block_data.get("block_type", ""),
+                    "name": block_data.get("name", ""),
+                    "parent_function_id": block_data.get("parent_function_id", ""),
+                    "lang": block_data.get("lang", ""),
+                    "file_path": block_data.get("file_path", ""),
+                    "start_line": block_data.get("start_line", 0),
+                    "end_line": block_data.get("end_line", 0),
+                    "nesting_depth": block_data.get("nesting_depth", 1),
+                    "captured_variables": block_data.get("captured_variables", []),
+                })
+
+        return results
+
+    def get_block_statistics(
+        self,
+        function_id: Optional[str] = None,
+    ) -> dict:
+        """Get statistics about blocks.
+
+        Args:
+            function_id: Optional function ID to get stats for a specific function
+
+        Returns:
+            Dictionary with block statistics
+        """
+        if function_id:
+            cypher = """
+MATCH (f)-[r:CONTAINS_BLOCK]->(b:Block)
+WHERE f.id = $function_id AND b.valid_to IS NULL
+RETURN
+  count(b) AS total_blocks,
+  count(CASE WHEN b.block_type = 'if' THEN 1 END) AS if_count,
+  count(CASE WHEN b.block_type = 'for' THEN 1 END) AS for_count,
+  count(CASE WHEN b.block_type = 'while' THEN 1 END) AS while_count,
+  count(CASE WHEN b.block_type = 'try' THEN 1 END) AS try_count,
+  count(CASE WHEN b.block_type = 'lambda' THEN 1 END) AS lambda_count,
+  count(CASE WHEN b.block_type = 'with' THEN 1 END) AS with_count,
+  count(CASE WHEN b.block_type = 'match' THEN 1 END) AS match_count,
+  avg(b.nesting_depth) AS avg_nesting,
+  max(b.nesting_depth) AS max_nesting
+"""
+            params = {"function_id": function_id}
+        else:
+            cypher = """
+MATCH (b:Block)
+WHERE b.valid_to IS NULL
+RETURN
+  count(b) AS total_blocks,
+  count(CASE WHEN b.block_type = 'if' THEN 1 END) AS if_count,
+  count(CASE WHEN b.block_type = 'for' THEN 1 END) AS for_count,
+  count(CASE WHEN b.block_type = 'while' THEN 1 END) AS while_count,
+  count(CASE WHEN b.block_type = 'try' THEN 1 END) AS try_count,
+  count(CASE WHEN b.block_type = 'lambda' THEN 1 END) AS lambda_count,
+  count(CASE WHEN b.block_type = 'with' THEN 1 END) AS with_count,
+  count(CASE WHEN b.block_type = 'match' THEN 1 END) AS match_count,
+  avg(b.nesting_depth) AS avg_nesting,
+  max(b.nesting_depth) AS max_nesting
+"""
+            params = {}
+
+        with self._driver.session() as session:
+            record = session.run(cypher, **params).single()
+            if not record:
+                return {"total_blocks": 0}
+
+            return {
+                "total_blocks": record["total_blocks"] or 0,
+                "if_count": record["if_count"] or 0,
+                "for_count": record["for_count"] or 0,
+                "while_count": record["while_count"] or 0,
+                "try_count": record["try_count"] or 0,
+                "lambda_count": record["lambda_count"] or 0,
+                "with_count": record["with_count"] or 0,
+                "match_count": record["match_count"] or 0,
+                "avg_nesting": float(record["avg_nesting"]) if record["avg_nesting"] else 0.0,
+                "max_nesting": record["max_nesting"] or 0,
+            }

@@ -549,6 +549,55 @@ RUST_QUERIES: dict[str, str] = {
     "trait_bounds": """
 (trait_bounds) @node
 """,
+    # --- Block extraction queries ---
+    "if_blocks": """
+(if_expression
+  condition: (_) @condition
+  consequence: (block)? @consequence
+  alternative: (else_clause (block)? @alternative)?
+) @node
+""",
+    "for_blocks": """
+(for_expression
+  pattern: (_) @pattern
+  iterable: (_) @iterable
+  body: (block)? @body
+) @node
+""",
+    "while_blocks": """
+(while_expression
+  condition: (_) @condition
+  body: (block)? @body
+) @node
+""",
+    "loop_blocks": """
+(loop_expression
+  body: (block)? @body
+  (label: (loop_label))? @label
+) @node
+""",
+    "match_blocks": """
+(match_expression
+  value: (_) @subject
+  body: (match_body
+    (match_arm
+      pattern: (_) @pattern
+      value: (_) @consequence
+    )*
+  )
+) @node
+""",
+    "try_blocks": """
+(try_expression
+  (block)? @body
+) @node
+""",
+    "closure_expr": """
+(closure_expression
+  parameters: (closure_parameters)? @params
+  body: (_) @body
+) @node
+""",
 }
 
 # ---------------------------------------------------------------------------
@@ -587,6 +636,60 @@ PYTHON_QUERIES: dict[str, str] = {
     (identifier) @callee_name
     (attribute attribute: (identifier) @callee_name)
   ]
+) @node
+""",
+    # --- Block extraction queries ---
+    "if_blocks": """
+(if_statement
+  condition: (_) @condition
+  consequence: (block)? @consequence
+  alternative: (else_clause (block)? @alternative)?
+) @node
+""",
+    "for_blocks": """
+(for_statement
+  target: (_) @target
+  iterable: (_) @iterable
+  body: (block)? @body
+) @node
+""",
+    "while_blocks": """
+(while_statement
+  condition: (_) @condition
+  body: (block)? @body
+) @node
+""",
+    "try_blocks": """
+(try_statement
+  body: (block)? @body
+  handler: (except_clause
+    value: (_)? @exception_type
+    body: (block)? @handler_body
+  )*
+  finally_clause: (block)? @finally_body
+) @node
+""",
+    "with_blocks": """
+(with_statement
+  (with_item)+ @with_items
+  body: (block)? @body
+) @node
+""",
+    "lambda_expr": """
+(lambda
+  parameters: (lambda_parameters)? @params
+  body: (_) @body
+) @node
+""",
+    "match_blocks": """
+(match_statement
+  subject: (_) @subject
+  body: (block
+    (case_clause
+      pattern: (_) @pattern
+      consequence: (block)? @consequence
+    )*
+  )
 ) @node
 """,
 }

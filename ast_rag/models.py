@@ -41,6 +41,7 @@ class NodeKind(str, Enum):
     FIELD = "Field"            # class member field
     VARIABLE = "Variable"
     PARAMETER = "Parameter"
+    BLOCK = "Block"            # Code block (if/for/while/try/lambda/with)
     CURRENT_VERSION = "CurrentVersion"
 
 
@@ -52,6 +53,7 @@ class EdgeKind(str, Enum):
     CONTAINS_METHOD = "CONTAINS_METHOD"
     CONTAINS_FUNCTION = "CONTAINS_FUNCTION"
     CONTAINS_FIELD = "CONTAINS_FIELD"
+    CONTAINS_BLOCK = "CONTAINS_BLOCK"  # Function contains block
     HAS_PARAMETER = "HAS_PARAMETER"
     IMPORTS = "IMPORTS"      # Java / Python / TS import
     INCLUDES = "INCLUDES"    # C++ #include
@@ -187,6 +189,96 @@ class ASTEdge(BaseModel):
             "raw_type_string": self.raw_type_string or "",
             "confidence": self.confidence or 0.0,
         }
+
+
+class BlockType(str, Enum):
+    """Types of code blocks that can be extracted."""
+    IF = "if"
+    FOR = "for"
+    WHILE = "while"
+    TRY = "try"
+    LAMBDA = "lambda"
+    WITH = "with"
+    MATCH = "match"        # Rust match, Python match (3.10+)
+    SWITCH = "switch"      # C++/Java/TS switch
+    LOOP = "loop"          # Rust loop
+
+
+class ASTBlock(BaseModel):
+    """Represents a code block extracted from within a function or lambda.
+
+    Blocks are nested code structures that have their own scope and control flow.
+    Examples: if/else branches, loop bodies, try/catch blocks, lambda expressions,
+    with statements, match arms, etc.
+
+    The `id` field is a stable, content-addressed identifier derived from
+    file_path, block_type, parent_function_id, and start_line.
+    """
+    id: str = Field(default="", description="Stable SHA-256 based identifier")
+    block_type: BlockType
+    name: str = Field(default="", description="Optional name (e.g., lambda argument names)")
+    parent_function_id: str = Field(..., description="ID of the containing function/method")
+    lang: Language
+    file_path: str
+    start_line: int
+    end_line: int
+    start_byte: int
+    end_byte: int
+    nesting_depth: int = Field(default=1, description="Nesting depth within the parent function")
+    source_text: Optional[str] = Field(default=None, exclude=True, description="Raw source code of the block")
+    code_hash: str = Field(default="", description="SHA-256 of the raw source text")
+    captured_variables: list[str] = Field(default_factory=list, description="Variables captured from outer scope (for lambdas)")
+    valid_from: str = "INIT"
+    valid_to: Optional[str] = None
+
+    @model_validator(mode="after")
+    def compute_derived_fields(self) -> "ASTBlock":
+        """Auto-compute id and code_hash if not provided."""
+        if not self.id:
+            raw = f"{self.file_path}:{self.block_type.value}:{self.parent_function_id}:{self.start_line}"
+            self.id = hashlib.sha256(raw.encode()).hexdigest()[:24]
+        if not self.code_hash and self.source_text:
+            self.code_hash = hashlib.sha256(self.source_text.encode()).hexdigest()[:24]
+        return self
+
+    def to_neo4j_props(self) -> dict[str, Any]:
+        """Serialize block to a flat dict suitable for Neo4j property map."""
+        return {
+            "id": self.id,
+            "block_type": self.block_type.value,
+            "name": self.name,
+            "parent_function_id": self.parent_function_id,
+            "lang": self.lang.value,
+            "file_path": self.file_path,
+            "start_line": self.start_line,
+            "end_line": self.end_line,
+            "start_byte": self.start_byte,
+            "end_byte": self.end_byte,
+            "nesting_depth": self.nesting_depth,
+            "code_hash": self.code_hash,
+            "captured_variables": self.captured_variables,
+            "valid_from": self.valid_from,
+            "valid_to": self.valid_to,
+        }
+
+    def to_standard_result(self, score: Optional[float] = None) -> StandardResult:
+        """Convert ASTBlock to StandardResult."""
+        return StandardResult(
+            id=self.id,
+            name=self.name or f"{self.block_type.value}_block",
+            qualified_name=f"{self.parent_function_id}.{self.block_type.value}@{self.start_line}",
+            kind="Block",
+            lang=self.lang.value,
+            file_path=self.file_path,
+            start_line=self.start_line,
+            end_line=self.end_line,
+            score=score,
+            metadata={
+                "block_type": self.block_type.value,
+                "nesting_depth": self.nesting_depth,
+                "captured_variables": self.captured_variables,
+            },
+        )
 
 
 # ---------------------------------------------------------------------------

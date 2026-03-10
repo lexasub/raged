@@ -15,6 +15,7 @@ Commands:
   workspace <path>                  Show workspace diff
   evaluate                          Evaluate quality against benchmarks
   index-folder <path>               Index a single folder
+  summarize <qualified_name>        Generate LLM summary for a function/class
 """
 
 from __future__ import annotations
@@ -116,6 +117,8 @@ def init(
 
     all_nodes = []
     all_edges = []
+    all_blocks = []
+    all_block_edges = []
 
     with console.status(f"Parsing {len(files)} files...") as status:
         for i, (fp, lang) in enumerate(files):
@@ -127,16 +130,33 @@ def init(
                 source = fh.read()
             nodes = pm.extract_nodes(tree, fp, lang, source, commit)
             edges = pm.extract_edges(tree, nodes, fp, lang, source, commit)
+            
+            # Extract blocks for Python and Rust files
+            if lang in ("python", "rust"):
+                blocks, block_edges = pm.extract_blocks(tree, nodes, fp, lang, source, commit)
+                all_blocks.extend(blocks)
+                all_block_edges.extend(block_edges)
+            
             all_nodes.extend(nodes)
             all_edges.extend(edges)
 
     console.print(
-        f"Extracted [bold]{len(all_nodes)}[/bold] nodes and [bold]{len(all_edges)}[/bold] edges."
+        f"Extracted [bold]{len(all_nodes)}[/bold] nodes, [bold]{len(all_edges)}[/bold] edges, "
+        f"and [bold]{len(all_blocks)}[/bold] blocks."
     )
 
     # 3. Write to Neo4j
     with console.status("Writing to Neo4j..."):
         full_index(driver, all_nodes, all_edges, commit_hash=commit)
+        
+        # Store blocks and CONTAINS_BLOCK edges
+        if all_blocks:
+            from ast_rag.graph_updater import batch_upsert_blocks, batch_upsert_block_edges
+            with driver.session() as session:
+                batch_upsert_blocks(session, all_blocks, commit_hash)
+                batch_upsert_block_edges(session, all_block_edges)
+            console.print(f"[green]Stored {len(all_blocks)} blocks and {len(all_block_edges)} CONTAINS_BLOCK edges.[/green]")
+    
     console.print("[green]Graph database updated.[/green]")
 
     # 4. Build embeddings
@@ -1046,6 +1066,175 @@ def index_folder(
 
     driver.close()
 
+
+# ---------------------------------------------------------------------------
+# blocks command
+# ---------------------------------------------------------------------------
+
+
+@app.command("blocks")
+def blocks(
+    function: str = typer.Argument(..., help="Function name or ID to get blocks for"),
+    block_type: Optional[str] = typer.Option(
+        None, "--type", "-t",
+        help="Filter by block type: if/for/while/try/lambda/with/match/loop"
+    ),
+    lang: Optional[str] = typer.Option(None, "--lang", "-l", help="Language filter"),
+    source: bool = typer.Option(False, "--source", "-s", help="Show source code for blocks"),
+    stats: bool = typer.Option(False, "--stats", help="Show block statistics"),
+    config: Optional[str] = typer.Option(None, "--config", "-c"),
+    humanize: bool = humanize_option,
+) -> None:
+    """
+    Extract and display code blocks (if/for/while/try/lambda/with) from functions.
+
+    Examples:
+
+      # Get all blocks from a function
+      ast-rag blocks my_function
+
+      # Get only lambda blocks
+      ast-rag blocks my_function --type lambda
+
+      # Get blocks with source code
+      ast-rag blocks my_function --type lambda --source
+
+      # Get global block statistics
+      ast-rag blocks --stats
+
+      # Get all lambdas with captured variables
+      ast-rag blocks --type lambda --lang python
+    """
+    cfg = _load_config(config)
+    api = _build_api(cfg)
+
+    if stats:
+        # Show global statistics
+        stats_data = api.get_block_statistics()
+        
+        if humanize:
+            console.print("\n[bold]Block Statistics[/bold]\n")
+            console.print(f"  Total blocks:      [green]{stats_data.get('total_blocks', 0)}[/green]")
+            console.print(f"  If blocks:         {stats_data.get('if_count', 0)}")
+            console.print(f"  For blocks:        {stats_data.get('for_count', 0)}")
+            console.print(f"  While blocks:      {stats_data.get('while_count', 0)}")
+            console.print(f"  Try blocks:        {stats_data.get('try_count', 0)}")
+            console.print(f"  Lambda blocks:     {stats_data.get('lambda_count', 0)}")
+            console.print(f"  With blocks:       {stats_data.get('with_count', 0)}")
+            console.print(f"  Match blocks:      {stats_data.get('match_count', 0)}")
+            console.print(f"  Avg nesting:       {stats_data.get('avg_nesting', 0):.2f}")
+            console.print(f"  Max nesting:       {stats_data.get('max_nesting', 0)}")
+        else:
+            print(json.dumps(stats_data, indent=2))
+        return
+
+    # Find the function by name
+    defs = api.find_definition(function, lang=lang)
+    if not defs:
+        # Try as function_id directly
+        function_id = function
+        function_name = function
+    else:
+        function_id = defs[0].id
+        function_name = defs[0].qualified_name
+
+    if humanize:
+        console.print(f"\n[bold]Blocks in[/bold] {function_name} (ID: {function_id[:12]}...)\n")
+
+    # Get blocks
+    blocks = api.get_blocks_for_function(function_id, block_type=block_type)
+
+    if not blocks:
+        console.print("[yellow]No blocks found.[/yellow]")
+        return
+
+    if humanize:
+        for i, block in enumerate(blocks, 1):
+            block_type_display = block.get("block_type", "unknown").upper()
+            console.print(f"[cyan]{i}. {block_type_display}[/cyan] block at line {block.get('start_line')}-{block.get('end_line')}")
+            console.print(f"   Nesting depth: {block.get('nesting_depth')}")
+            
+            if block.get("captured_variables"):
+                console.print(f"   Captured vars: [yellow]{', '.join(block['captured_variables'])}[/yellow]")
+            
+            if block.get("name"):
+                console.print(f"   Name: {block['name']}")
+            
+            if source:
+                source_code = api.get_block_source(block["id"])
+                if source_code:
+                    console.print(f"   [dim]Source:[/dim]")
+                    for line in source_code.split("\n")[:5]:  # Show first 5 lines
+                        console.print(f"     [dim]{line}[/dim]")
+                    if len(source_code.split("\n")) > 5:
+                        console.print("     [dim]...[/dim]")
+            console.print()
+    else:
+        print(json.dumps(blocks, indent=2))
+
+
+# ---------------------------------------------------------------------------
+# lambdas command (shortcut for blocks --type lambda)
+# ---------------------------------------------------------------------------
+
+
+@app.command("lambdas")
+def list_lambdas(
+    lang: Optional[str] = typer.Option(None, "--lang", "-l", help="Language filter"),
+    captured: bool = typer.Option(False, "--captured", "-c", help="Only show lambdas with captured variables"),
+    source: bool = typer.Option(False, "--source", "-s", help="Show source code"),
+    config: Optional[str] = typer.Option(None, "--config", "-c"),
+    humanize: bool = humanize_option,
+) -> None:
+    """
+    List all lambda/closure blocks in the codebase.
+
+    Shortcut for: ast-rag blocks --type lambda
+
+    Examples:
+
+      # Get all lambdas
+      ast-rag lambdas
+
+      # Get lambdas with captured variables (closures)
+      ast-rag lambdas --captured
+
+      # Get Python lambdas only
+      ast-rag lambdas --lang python
+    """
+    cfg = _load_config(config)
+    api = _build_api(cfg)
+
+    if humanize:
+        caption = "Lambda blocks"
+        if captured:
+            caption += " with captured variables"
+        if lang:
+            caption += f" in {lang}"
+        console.print(f"\n[bold]{caption}[/bold]\n")
+
+    lambdas = api.get_lambda_blocks(lang=lang, with_captured_vars=captured)
+
+    if not lambdas:
+        console.print("[yellow]No lambdas found.[/yellow]")
+        return
+
+    if humanize:
+        for i, lam in enumerate(lambdas, 1):
+            console.print(f"[cyan]{i}.[/cyan] {lam.get('name', 'lambda')} at line {lam.get('start_line')}")
+            console.print(f"   File: {lam.get('file_path')}")
+            console.print(f"   Parent: {lam.get('parent_function_id', 'unknown')[:24]}...")
+            
+            if lam.get("captured_variables"):
+                console.print(f"   Captured: [yellow]{', '.join(lam['captured_variables'])}[/yellow]")
+            
+            if source:
+                source_code = api.get_block_source(lam["id"])
+                if source_code:
+                    console.print(f"   [dim]Source: {source_code[:100]}...[/dim]")
+            console.print()
+    else:
+        print(json.dumps(lambdas, indent=2))
 
 if __name__ == "__main__":
     app()
