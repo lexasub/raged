@@ -42,6 +42,7 @@ app = typer.Typer(
     add_completion=False,
 )
 console = Console()
+logger = logging.getLogger(__name__)
 
 
 def _get_humanize_callback() -> callable:
@@ -67,11 +68,41 @@ humanize_option = typer.Option(
 def _load_config(config_path: Optional[str] = None) -> ProjectConfig:
     """Load project config from JSON file or return defaults."""
     if config_path and Path(config_path).exists():
-        return ProjectConfig.model_validate_json(Path(config_path).read_text())
+        cfg = ProjectConfig.model_validate_json(Path(config_path).read_text())
+        logger.info(
+            f"Loaded config from: {config_path}, remote_url={cfg.embedding.remote_url}"
+        )
+        return cfg
+
+    # Try environment variable first
+    env_config = os.environ.get("AST_RAG_CONFIG")
+    if env_config and Path(env_config).exists():
+        cfg = ProjectConfig.model_validate_json(Path(env_config).read_text())
+        logger.info(
+            f"Loaded config from AST_RAG_CONFIG: {env_config}, remote_url={cfg.embedding.remote_url}"
+        )
+        return cfg
+
     # Check for ast_rag_config.json in CWD
     default = Path("ast_rag_config.json")
     if default.exists():
-        return ProjectConfig.model_validate_json(default.read_text())
+        cfg = ProjectConfig.model_validate_json(default.read_text())
+        logger.info(
+            f"Loaded config from CWD: {default.absolute()}, remote_url={cfg.embedding.remote_url}"
+        )
+        return cfg
+
+    # Check for ast_rag_config.json in script directory
+    script_dir = Path(__file__).parent
+    default_in_script = script_dir / "ast_rag_config.json"
+    if default_in_script.exists():
+        cfg = ProjectConfig.model_validate_json(default_in_script.read_text())
+        logger.info(
+            f"Loaded config from script dir: {default_in_script}, remote_url={cfg.embedding.remote_url}"
+        )
+        return cfg
+
+    logger.warning("No config found, using defaults")
     return ProjectConfig()
 
 

@@ -65,11 +65,29 @@ def _get_api(config_path: Optional[str] = None) -> ASTRagAPI:
     if config_path and Path(config_path).exists():
         _config = ProjectConfig.model_validate_json(Path(config_path).read_text())
     else:
-        default = Path("ast_rag_config.json")
-        if default.exists():
-            _config = ProjectConfig.model_validate_json(default.read_text())
+        # Try environment variable first
+        env_config = os.environ.get("AST_RAG_CONFIG")
+        if env_config and Path(env_config).exists():
+            _config = ProjectConfig.model_validate_json(Path(env_config).read_text())
         else:
-            _config = ProjectConfig()
+            # Try default in CWD
+            default = Path("ast_rag_config.json")
+            if default.exists():
+                _config = ProjectConfig.model_validate_json(default.read_text())
+            else:
+                # Try default in script directory
+                script_dir = Path(__file__).parent
+                default_in_script = script_dir / "ast_rag_config.json"
+                if default_in_script.exists():
+                    _config = ProjectConfig.model_validate_json(
+                        default_in_script.read_text()
+                    )
+                else:
+                    _config = ProjectConfig()
+
+    logger.info(
+        f"AST-RAG MCP config loaded: remote_url={_config.embedding.remote_url}, model={_config.embedding.model_name}"
+    )
 
     # Create driver and embedding manager
     driver = create_driver(_config.neo4j)
