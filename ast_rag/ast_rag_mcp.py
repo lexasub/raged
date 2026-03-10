@@ -18,6 +18,7 @@ Tools:
 - expand_neighbourhood: Get subgraph around a node
 - analyze_text: Analyze arbitrary text (stack traces, errors, etc.)
 - search_by_signature: Search functions/methods by signature pattern
+- summarize_code: Generate LLM-based summary for a function/class
 """
 
 from __future__ import annotations
@@ -37,7 +38,7 @@ from ast_rag.graph_updater import (
     compute_diff_for_commits,
 )
 from ast_rag.embeddings import EmbeddingManager
-from ast_rag.ast_rag_api import ASTRagAPI
+from ast_rag.services.api import ASTRagAPI
 from ast_rag.ast_parser import ParserManager, walk_source_files
 
 logger = logging.getLogger(__name__)
@@ -49,34 +50,54 @@ SCHEMA_VERSION = "1.0"
 # Create MCP server
 mcp = FastMCP("AST-RAG")
 
-# Global API instance (lazy-initialized)
-_api: Optional[ASTRagAPI] = None
-_config: Optional[ProjectConfig] = None
+# Cache of API instances per project (keyed by config path or CWD)
+_api_cache: dict[str, ASTRagAPI] = {}
+_config_cache: dict[str, ProjectConfig] = {}
 
 
 def _get_api(config_path: Optional[str] = None) -> ASTRagAPI:
-    """Get or create the API instance."""
-    global _api, _config
-
-    if _api is not None:
-        return _api
-
-    # Load config
+    """Get or create the API instance for a specific project.
+    
+    Uses config_path to identify the project. If not provided, uses CWD.
+    This allows working with multiple projects simultaneously.
+    """
+    # Determine project key
     if config_path and Path(config_path).exists():
-        _config = ProjectConfig.model_validate_json(Path(config_path).read_text())
+        project_key = str(Path(config_path).resolve())
     else:
         default = Path("ast_rag_config.json")
         if default.exists():
-            _config = ProjectConfig.model_validate_json(default.read_text())
+            project_key = str(default.resolve())
         else:
-            _config = ProjectConfig()
+            # No config - use CWD as key
+            project_key = str(Path.cwd().resolve())
+    
+    # Return cached instance if available
+    if project_key in _api_cache:
+        return _api_cache[project_key]
+    
+    # Load config
+    if config_path and Path(config_path).exists():
+        config = ProjectConfig.model_validate_json(Path(config_path).read_text())
+    else:
+        default = Path("ast_rag_config.json")
+        if default.exists():
+            config = ProjectConfig.model_validate_json(default.read_text())
+        else:
+            config = ProjectConfig()
+    
+    # Cache config
+    _config_cache[project_key] = config
 
     # Create driver and embedding manager
-    driver = create_driver(_config.neo4j)
-    embed = EmbeddingManager(_config.qdrant, _config.embedding, neo4j_driver=driver)
-    _api = ASTRagAPI(driver, embed)
+    driver = create_driver(config.neo4j)
+    embed = EmbeddingManager(config.qdrant, config.embedding, neo4j_driver=driver)
+    api = ASTRagAPI(driver, embed)
+    
+    # Cache API instance
+    _api_cache[project_key] = api
 
-    return _api
+    return api
 
 
 @mcp.tool()
@@ -109,7 +130,16 @@ def index_project(
     Returns:
         dict with counts of files, nodes, and edges
     """
-    cfg = _config or ProjectConfig()
+    # Load config
+    if config_path and Path(config_path).exists():
+        cfg = ProjectConfig.model_validate_json(Path(config_path).read_text())
+    else:
+        default = Path("ast_rag_config.json")
+        if default.exists():
+            cfg = ProjectConfig.model_validate_json(default.read_text())
+        else:
+            cfg = ProjectConfig()
+    
     root = os.path.abspath(path)
 
     # Apply schema
@@ -187,7 +217,16 @@ def update_project(
             "warning": dry_result.get("warning"),
         }
 
-    cfg = _config or ProjectConfig()
+    # Load config
+    if config_path and Path(config_path).exists():
+        cfg = ProjectConfig.model_validate_json(Path(config_path).read_text())
+    else:
+        default = Path("ast_rag_config.json")
+        if default.exists():
+            cfg = ProjectConfig.model_validate_json(default.read_text())
+        else:
+            cfg = ProjectConfig()
+    
     driver = create_driver(cfg.neo4j)
 
     diff = update_from_git(driver, path, from_commit, to_commit)
@@ -766,6 +805,282 @@ def get_call_confidence(
     api = _get_api(config_path)
     result = api.get_call_confidence(from_name, to_name)
     return result
+
+@mcp.tool()
+def analyze_stacktrace(
+    stacktrace: str,
+    lang: Optional[str] = None,
+    include_code_snippets: bool = True,
+    find_similar_issues: bool = True,
+    config_path: Optional[str] = None,
+) -> dict:
+    """Analyze a stack trace and map it to code locations.
+
+    Parses stack traces from Python, C++, Java, or Rust and:
+    1. Identifies error type and message
+    2. Maps each frame to AST nodes in the indexed codebase
+    3. Retrieves code snippets for relevant frames
+    4. Analyzes root cause and suggests fixes
+    5. Finds similar historical issues (if enabled)
+
+    Args:
+        stacktrace: Raw stack trace text
+        lang: Optional language hint (python/cpp/java/rust)
+        include_code_snippets: Include code snippets for frames
+        find_similar_issues: Search for similar historical issues
+        config_path: Path to config JSON file
+
+    Returns:
+        Dictionary with analysis results:
+        - error_type: Detected error type
+        - message: Error message
+        - language: Detected language
+        - root_cause: Root cause analysis with suggested fix
+        - call_chain: List of mapped frames with code snippets
+        - similar_issues: List of similar historical issues
+        - total_frames: Total frames parsed
+        - mapped_frames: Frames successfully mapped to AST
+
+    Example:
+        {
+            "error_type": "NullPointerException",
+            "message": "Cannot invoke method on null object",
+            "language": "java",
+            "root_cause": {
+                "category": "null_pointer",
+                "severity": "high",
+                "likely_cause": "Variable not initialized",
+                "suggested_fix": "Add null check before method call",
+                "confidence": 0.85
+            },
+            "call_chain": [
+                {
+                    "frame_index": 0,
+                    "function": "MyClass.myMethod",
+                    "file": "MyClass.java",
+                    "line": 42,
+                    "code_snippet": "obj.doSomething();"
+                }
+            ]
+        }
+    """
+    from ast_rag.stack_trace.service import StackTraceService
+
+    api = _get_api(config_path)
+
+    try:
+        service = StackTraceService(
+            driver=api._driver,
+            embedding_manager=api._embed,
+        )
+
+        report = service.analyze(
+            stacktrace=stacktrace,
+            lang_hint=lang,
+            retrieve_snippets=include_code_snippets,
+            find_similar=find_similar_issues,
+        )
+
+        return {
+            "success": True,
+            "error_type": report.error_type,
+            "message": report.message,
+            "language": report.language,
+            "root_cause": {
+                "category": report.root_cause.category if report.root_cause else None,
+                "severity": report.root_cause.severity if report.root_cause else None,
+                "likely_cause": report.root_cause.likely_cause if report.root_cause else None,
+                "suggested_fix": report.root_cause.suggested_fix if report.root_cause else None,
+                "confidence": report.root_cause.confidence if report.root_cause else None,
+            } if report.root_cause else None,
+            "call_chain": [
+                {
+                    "frame_index": frame.frame_index,
+                    "function": frame.function_name,
+                    "file": frame.file_path,
+                    "line": frame.line_number,
+                    "code_snippet": frame.code_snippet,
+                    "ast_node_id": frame.ast_node_id,
+                }
+                for frame in report.call_chain
+            ],
+            "similar_issues": [
+                {
+                    "file": issue.file_path,
+                    "line": issue.line_number,
+                    "similarity": issue.similarity_score,
+                    "commit": issue.commit_hash,
+                }
+                for issue in report.similar_issues
+            ] if report.similar_issues else [],
+            "total_frames": report.total_frames,
+            "mapped_frames": report.mapped_frames,
+        }
+
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e),
+        }
+
+
+@mcp.tool()
+def get_blocks(
+    function_name: str,
+    block_type: Optional[str] = None,
+    lang: Optional[str] = None,
+    include_source: bool = True,
+    config_path: Optional[str] = None,
+) -> list[dict]:
+    """Get code blocks within a function.
+
+    Retrieves nested blocks (if/for/while/try/lambda/with) inside a function.
+    Useful for understanding function structure and complexity.
+
+    Args:
+        function_name: Function/method name to analyze
+        block_type: Optional filter (if/for/while/try/lambda/with/match)
+        lang: Optional language filter
+        include_source: Include source code for each block
+        config_path: Path to config JSON file
+
+    Returns:
+        List of blocks with:
+        - id: Block ID
+        - block_type: Type of block (if/for/while/etc.)
+        - name: Block name or description
+        - file_path: Source file path
+        - start_line, end_line: Line range
+        - nesting_depth: How deeply nested (0 = top level in function)
+        - source_text: Block source code (if include_source)
+        - captured_variables: Variables captured by lambda (if applicable)
+
+    Example:
+        [
+            {
+                "id": "block_123",
+                "block_type": "lambda",
+                "name": "lambda_42",
+                "file_path": "processor.py",
+                "start_line": 42,
+                "end_line": 42,
+                "nesting_depth": 2,
+                "source_text": "lambda x: x.name.strip()",
+                "captured_variables": ["user"]
+            }
+        ]
+    """
+    from ast_rag.block_extractor import BlockAnalyzer
+
+    api = _get_api(config_path)
+
+    # Find the function
+    defs = api.find_definition(function_name, kind="Function", lang=lang)
+    if not defs:
+        # Try Method kind
+        defs = api.find_definition(function_name, kind="Method", lang=lang)
+
+    if not defs:
+        return []
+
+    function_node = defs[0]
+
+    try:
+        analyzer = BlockAnalyzer(api._driver)
+
+        blocks = analyzer.get_blocks_for_function(
+            function_id=function_node.id,
+            block_type=block_type,
+            limit=100,
+        )
+
+        return [
+            {
+                "id": b.id,
+                "block_type": b.block_type.value,
+                "name": b.name,
+                "file_path": b.file_path,
+                "start_line": b.start_line,
+                "end_line": b.end_line,
+                "nesting_depth": b.nesting_depth,
+                "source_text": b.source_text if include_source else None,
+                "captured_variables": b.captured_variables if b.captured_variables else None,
+            }
+            for b in blocks
+        ]
+
+    except Exception:
+        return []
+
+
+@mcp.tool()
+def find_lambdas(
+    lang: Optional[str] = None,
+    with_captured_vars: bool = True,
+    limit: int = 50,
+    config_path: Optional[str] = None,
+) -> list[dict]:
+    """Find all lambda/closure expressions in the codebase.
+
+    Useful for finding anonymous functions and closures with their
+    captured variables.
+
+    Args:
+        lang: Optional language filter (python/rust/typescript)
+        with_captured_vars: Include captured variables
+        limit: Maximum results to return
+        config_path: Path to config JSON file
+
+    Returns:
+        List of lambda blocks with:
+        - id: Block ID
+        - file_path: Source file
+        - start_line, end_line: Line range
+        - parent_function: Function containing this lambda
+        - captured_variables: Variables captured from outer scope
+        - signature: Lambda signature if available
+
+    Example:
+        [
+            {
+                "id": "lambda_42",
+                "file_path": "processor.py",
+                "start_line": 42,
+                "end_line": 42,
+                "parent_function": "process_users",
+                "captured_variables": ["user", "config"],
+                "signature": "lambda x: x.name.strip()"
+            }
+        ]
+    """
+    from ast_rag.block_extractor import BlockAnalyzer
+
+    api = _get_api(config_path)
+
+    try:
+        analyzer = BlockAnalyzer(api._driver)
+
+        blocks = analyzer.get_lambda_blocks(
+            lang=lang,
+            with_captured_vars=with_captured_vars,
+            limit=limit,
+        )
+
+        return [
+            {
+                "id": b.id,
+                "file_path": b.file_path,
+                "start_line": b.start_line,
+                "end_line": b.end_line,
+                "parent_function": b.parent_function_id,
+                "captured_variables": b.captured_variables if with_captured_vars else None,
+                "signature": b.source_text[:100] if b.source_text else None,
+            }
+            for b in blocks
+        ]
+
+    except Exception:
+        return []
 
 
 def main():

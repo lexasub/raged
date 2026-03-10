@@ -383,6 +383,8 @@ class EmbeddingConfig(BaseModel):
     # Set this to the URL of a running embedding_server.py instance on a GPU machine.
     # Example: "http://gpu-server:8765"
     remote_url: Optional[str] = None
+    # Dimension for remote embeddings (required when remote_url is set)
+    dimension: Optional[int] = None
     # Maximum number of texts to send per request to the remote embedding server.
     # Many OpenAI-compatible servers have limits on batch size.
     remote_batch_size: int = 32

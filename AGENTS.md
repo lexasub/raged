@@ -224,3 +224,17 @@ ast-rag callers --help
 # Examples
 ast-rag evaluate --help
 ```
+
+---
+
+## 🌐 Language Preferences
+
+**All code comments and documentation must be in English.**
+
+- ✅ Code comments: English
+- ✅ Docstrings: English
+- ✅ Documentation files: English
+- ✅ Commit messages: English (Conventional Commits format)
+- ✅ PR/MR descriptions: English
+
+This ensures consistency for international collaboration.

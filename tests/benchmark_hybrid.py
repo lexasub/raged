@@ -35,7 +35,7 @@ import numpy as np
 from ast_rag.models import ProjectConfig
 from ast_rag.graph_schema import create_driver
 from ast_rag.embeddings import EmbeddingManager
-from ast_rag.ast_rag_api import ASTRagAPI
+from ast_rag.services.api import ASTRagAPI
 
 logger = logging.getLogger(__name__)
 

@@ -239,8 +239,18 @@ class EmbeddingManager:
         """Create collection if it doesn't already exist."""
         name = self._qdrant_config.collection_name
         if not client.collection_exists(name):
-            model = self._get_model()
-            dim = model.get_sentence_embedding_dimension()
+            # Use dimension from config when remote_url is set, otherwise load model
+            if self._embed_config.remote_url:
+                dim = self._embed_config.dimension
+                if dim is None:
+                    raise ValueError(
+                        "EmbeddingConfig.dimension must be set when using remote_url. "
+                        "Please add 'dimension': 1024 (or appropriate value) to your "
+                        "embedding config."
+                    )
+            else:
+                model = self._get_model()
+                dim = model.get_sentence_embedding_dimension()
             client.create_collection(
                 collection_name=name,
                 vectors_config=VectorParams(size=dim, distance=Distance.COSINE),
