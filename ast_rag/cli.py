@@ -36,6 +36,7 @@ from ast_rag.graph_updater import full_index, update_from_git, get_workspace_dif
 from ast_rag.embeddings import EmbeddingManager
 from ast_rag.services.api import ASTRagAPI
 from ast_rag.output import get_formatter
+from ast_rag.summarizer import SummarizerService
 
 app = typer.Typer(
     name="ast-rag",
@@ -1271,47 +1272,47 @@ def analyze_stacktrace(
 ) -> None:
     """
     Analyze a stack trace and map it to code with context.
-    
+
     This command parses stack traces from Python, C++, Java, or Rust,
     maps each frame to AST nodes, retrieves code snippets, and provides
     root cause analysis with suggested fixes.
-    
+
     **Input:**
-    
+
     Reads stack trace from:
     - File path (if provided as argument)
     - Standard input (if no argument)
-    
+
     **Supported Formats:**
-    
+
     - **Python:** File "x.py", line 42, in func
     - **C++:** #0 0x... in func() at file.cpp:42
     - **Java:** at com.example.Class.method(Class.java:42)
     - **Rust:** at src/file.rs:42
-    
+
     **Output:**
-    
+
     Generates a StackTraceReport with:
     - Parsed call chain with frame details
     - Root cause analysis and severity
     - Code snippets for each frame
     - Suggested fixes
     - Similar issues from codebase
-    
+
     **Examples:**
-    
+
       # Read from stdin (paste stack trace, then Ctrl+D)
       ast-rag analyze-stacktrace
-      
+
       # Read from file
       ast-rag analyze-stacktrace error.log
-      
+
       # Output as JSON
       ast-rag analyze-stacktrace error.log -o json
-      
+
       # Skip AST mapping for faster analysis
       ast-rag analyze-stacktrace error.log --no-ast-mapping
-      
+
       # Pipe from another command
       python test.py 2>&1 | ast-rag analyze-stacktrace
     """
@@ -1319,7 +1320,7 @@ def analyze_stacktrace(
         logging.basicConfig(level=logging.DEBUG)
     else:
         logging.basicConfig(level=logging.WARNING)
-    
+
     # Read stack trace
     if input_path:
         try:
@@ -1335,33 +1336,33 @@ def analyze_stacktrace(
         console.print("[yellow]Reading stack trace from stdin (paste then Ctrl+D)...[/yellow]")
         import sys
         stacktrace = sys.stdin.read()
-    
+
     if not stacktrace.strip():
         console.print("[red]Empty stack trace provided[/red]")
         raise typer.Exit(1)
-    
+
     # Load config and initialize service
     cfg = _load_config(config)
-    
+
     try:
         driver = create_driver(cfg.neo4j)
         embed = EmbeddingManager(cfg.qdrant, cfg.embedding, neo4j_driver=driver)
-        
+
         from ast_rag.stack_trace import StackTraceService
-        
+
         service = StackTraceService(
             driver=driver,
             embedding_manager=embed,
             codebase_root=os.getcwd(),
         )
-        
+
         # Analyze stack trace
         with console.status("[bold blue]Analyzing stack trace...[/bold blue]"):
             report = service.analyze(stacktrace)
-        
+
         # Output results
         console.print()
-        
+
         if output == "json":
             print(report.to_json(indent=2))
         elif output == "text":
@@ -1380,15 +1381,324 @@ def analyze_stacktrace(
                     console.print(rc.suggested_fix)
         else:  # markdown
             console.print(report.to_markdown())
-        
+
         # Show stats
         console.print()
         console.print(f"[dim]Parsed {report.total_frames} frames, mapped {report.mapped_frames} to AST[/dim]")
         if report.similar_issues:
             console.print(f"[dim]Found {len(report.similar_issues)} similar issues[/dim]")
-        
+
         driver.close()
-        
+
+    except Exception as e:
+        console.print(f"[red]Error analyzing stack trace: {e}[/red]")
+        if verbose:
+            import traceback
+            console.print(traceback.format_exc())
+        raise typer.Exit(1)
+
+
+
+# ---------------------------------------------------------------------------
+# summarize command
+# ---------------------------------------------------------------------------
+
+
+@app.command("summarize")
+def summarize(
+    qualified_name: str = typer.Argument(..., help="Qualified name of the function/class to summarize"),
+    lang: Optional[str] = typer.Option(None, "--lang", "-l", help="Language filter"),
+    kind: Optional[str] = typer.Option(None, "--kind", "-k", help="Node kind filter (Function, Method, Class, etc.)"),
+    max_callers: int = typer.Option(5, "--max-callers", help="Maximum number of callers to include in context"),
+    max_callees: int = typer.Option(5, "--max-callees", help="Maximum number of callees to include in context"),
+    force: bool = typer.Option(False, "--force", "-f", help="Force regeneration, ignore cache"),
+    output: str = typer.Option("markdown", "--output", "-o", help="Output format: markdown, json, text"),
+    config: Optional[str] = typer.Option(None, "--config", "-c", help="Path to config JSON"),
+    verbose: bool = typer.Option(False, "--verbose", "-v"),
+    # LLM options
+    llm_base_url: str = typer.Option("http://localhost:11434/v1", "--llm-url", help="Base URL of OpenAI-compatible LLM API"),
+    llm_model: str = typer.Option("qwen2.5-coder:14b", "--llm-model", help="LLM model name"),
+    llm_api_key: Optional[str] = typer.Option(None, "--llm-api-key", help="API key for LLM (not needed for Ollama)"),
+) -> None:
+    """
+    Generate an LLM-based summary for a function, method, or class.
+
+    This command uses a local OpenAI-compatible LLM (Ollama, vLLM, etc.)
+    to analyze code and generate a structured summary including:
+    - Natural language description
+    - Input parameters
+    - Return values
+    - Side effects
+    - Call graph context (callers and callees)
+    - Complexity estimate
+    - Relevant tags
+
+    Examples:
+
+      # Summarize a function (uses cached result if available)
+      ast-rag summarize com.example.MyService.processRequest
+
+      # Summarize with JSON output
+      ast-rag summarize MyFunction --output json
+
+      # Force regeneration ignoring cache
+      ast-rag summarize MyFunction --force
+
+      # Use a different LLM model
+      ast-rag summarize MyClass --llm-model codellama:34b
+
+      # Include more context
+      ast-rag summarize MyFunction --max-callers 10 --max-callees 10
+
+    LLM Setup:
+
+      By default, uses Ollama at http://localhost:11434/v1 with model qwen2.5-coder:14b.
+
+      To use with Ollama:
+        1. Install Ollama: https://ollama.ai
+        2. Pull a model: ollama pull qwen2.5-coder:14b
+        3. Ollama runs automatically on localhost:11434
+
+      To use with vLLM or other OpenAI-compatible APIs:
+        ast-rag summarize MyFunction --llm-url http://localhost:8000/v1 --llm-model my-model
+
+    Output Formats:
+
+      - markdown: Human-readable Markdown (default)
+      - json: Structured JSON with all fields
+      - text: Plain text summary
+    """
+    if verbose:
+        logging.basicConfig(level=logging.DEBUG)
+    else:
+        logging.basicConfig(level=logging.WARNING)
+
+    cfg = _load_config(config)
+    api = _build_api(cfg)
+
+    # Find the node
+    with console.status(f"Finding '{qualified_name}'..."):
+        defs = api.find_definition(qualified_name, kind=kind, lang=lang)
+
+    if not defs:
+        console.print(f"[red]Symbol not found: {qualified_name}[/red]")
+        raise typer.Exit(1)
+
+    node = defs[0]
+
+    # Check if node kind is summarizable
+    summarizable_kinds = {"Function", "Method", "Constructor", "Destructor", "Class", "Interface", "Struct", "Trait"}
+    if node.kind.value not in summarizable_kinds:
+        console.print(f"[yellow]Warning: {node.kind.value} may not have detailed summary[/yellow]")
+
+    console.print(f"Summarizing [bold]{node.qualified_name}[/bold] ({node.kind.value})")
+    console.print(f"  File: {node.file_path}:{node.start_line}-{node.end_line}")
+
+    # Initialize summarizer
+    summarizer = SummarizerService(
+        base_url=llm_base_url,
+        model=llm_model,
+        api_key=llm_api_key,
+    )
+
+    # Generate summary
+    with console.status("Generating summary with LLM..."):
+        try:
+            summary = summarizer.summarize_node(
+                node_id=node.id,
+                api=api,
+                max_callers=max_callers,
+                max_callees=max_callees,
+                force_regenerate=force,
+            )
+        except Exception as exc:
+            console.print(f"[red]Error generating summary: {exc}[/red]")
+            raise typer.Exit(1)
+
+    # Output
+    console.print()
+
+    if output == "json":
+        print(json.dumps(summary.to_dict(), indent=2, ensure_ascii=False))
+    elif output == "text":
+        console.print(summary.summary)
+        console.print()
+        if summary.inputs:
+            console.print("[bold]Inputs:[/bold]")
+            for inp in summary.inputs:
+                console.print(f"  - {inp.get('name', 'unknown')}: {inp.get('description', '')}")
+        if summary.outputs:
+            console.print("[bold]Outputs:[/bold]")
+            for out in summary.outputs:
+                console.print(f"  - {out.get('name', 'return')}: {out.get('description', '')}")
+        if summary.side_effects:
+            console.print("[bold]Side Effects:[/bold]")
+            for effect in summary.side_effects:
+                console.print(f"  - {effect}")
+        console.print(f"[bold]Complexity:[/bold] {summary.complexity.value}")
+        console.print(f"[bold]Tags:[/bold] {', '.join(summary.tags) if summary.tags else 'none'}")
+    else:  # markdown
+        console.print(summary.to_markdown())
+
+    # Show cache stats if verbose
+    if verbose:
+        stats = summarizer.get_cache_stats()
+        console.print()
+        console.print(f"[dim]Cache: {stats['entries']} entries[/dim]")
+
+
+# ---------------------------------------------------------------------------
+# analyze-stacktrace command
+# ---------------------------------------------------------------------------
+
+
+@app.command("analyze-stacktrace")
+def analyze_stacktrace(
+    input_path: Optional[str] = typer.Argument(
+        None,
+        help="Path to file containing stack trace. If not provided, reads from stdin.",
+    ),
+    config: Optional[str] = typer.Option(
+        None, "--config", "-c",
+        help="Path to config JSON file",
+    ),
+    output: str = typer.Option(
+        "markdown", "--output", "-o",
+        help="Output format: markdown, json, text",
+    ),
+    verbose: bool = typer.Option(
+        False, "--verbose", "-v",
+        help="Enable verbose logging",
+    ),
+    no_ast_mapping: bool = typer.Option(
+        False, "--no-ast-mapping",
+        help="Skip AST node mapping (faster, less context)",
+    ),
+    limit_similar: int = typer.Option(
+        5, "--limit-similar", "-n",
+        help="Maximum number of similar issues to find",
+    ),
+) -> None:
+    """
+    Analyze a stack trace and map it to code with context.
+
+    This command parses stack traces from Python, C++, Java, or Rust,
+    maps each frame to AST nodes, retrieves code snippets, and provides
+    root cause analysis with suggested fixes.
+
+    **Input:**
+
+    Reads stack trace from:
+    - File path (if provided as argument)
+    - Standard input (if no argument)
+
+    **Supported Formats:**
+
+    - **Python:** File "x.py", line 42, in func
+    - **C++:** #0 0x... in func() at file.cpp:42
+    - **Java:** at com.example.Class.method(Class.java:42)
+    - **Rust:** at src/file.rs:42
+
+    **Output:**
+
+    Generates a StackTraceReport with:
+    - Parsed call chain with frame details
+    - Root cause analysis and severity
+    - Code snippets for each frame
+    - Suggested fixes
+    - Similar issues from codebase
+
+    **Examples:**
+
+      # Read from stdin (paste stack trace, then Ctrl+D)
+      ast-rag analyze-stacktrace
+
+      # Read from file
+      ast-rag analyze-stacktrace error.log
+
+      # Output as JSON
+      ast-rag analyze-stacktrace error.log -o json
+
+      # Skip AST mapping for faster analysis
+      ast-rag analyze-stacktrace error.log --no-ast-mapping
+
+      # Pipe from another command
+      python test.py 2>&1 | ast-rag analyze-stacktrace
+    """
+    if verbose:
+        logging.basicConfig(level=logging.DEBUG)
+    else:
+        logging.basicConfig(level=logging.WARNING)
+
+    # Read stack trace
+    if input_path:
+        try:
+            stacktrace = Path(input_path).read_text(encoding="utf-8", errors="replace")
+        except FileNotFoundError:
+            console.print(f"[red]File not found: {input_path}[/red]")
+            raise typer.Exit(1)
+        except OSError as e:
+            console.print(f"[red]Error reading file: {e}[/red]")
+            raise typer.Exit(1)
+    else:
+        # Read from stdin
+        console.print("[yellow]Reading stack trace from stdin (paste then Ctrl+D)...[/yellow]")
+        import sys
+        stacktrace = sys.stdin.read()
+
+    if not stacktrace.strip():
+        console.print("[red]Empty stack trace provided[/red]")
+        raise typer.Exit(1)
+
+    # Load config and initialize service
+    cfg = _load_config(config)
+
+    try:
+        driver = create_driver(cfg.neo4j)
+        embed = EmbeddingManager(cfg.qdrant, cfg.embedding, neo4j_driver=driver)
+
+        from ast_rag.stack_trace import StackTraceService
+
+        service = StackTraceService(
+            driver=driver,
+            embedding_manager=embed,
+            codebase_root=os.getcwd(),
+        )
+
+        # Analyze stack trace
+        with console.status("[bold blue]Analyzing stack trace...[/bold blue]"):
+            report = service.analyze(stacktrace)
+
+        # Output results
+        console.print()
+
+        if output == "json":
+            print(report.to_json(indent=2))
+        elif output == "text":
+            console.print(report.summary or "No summary available")
+            console.print()
+            if report.root_cause:
+                rc = report.root_cause
+                console.print(f"[bold]Error Type:[/bold] {rc.error_type}")
+                console.print(f"[bold]Category:[/bold] {rc.category or 'unknown'}")
+                console.print(f"[bold]Severity:[/bold] {rc.severity}")
+                console.print(f"[bold]Confidence:[/bold] {rc.confidence:.0%}")
+                if rc.likely_cause:
+                    console.print(f"[bold]Likely Cause:[/bold] {rc.likely_cause}")
+                if rc.suggested_fix:
+                    console.print(f"[bold]Suggested Fix:[/bold]")
+                    console.print(rc.suggested_fix)
+        else:  # markdown
+            console.print(report.to_markdown())
+
+        # Show stats
+        console.print()
+        console.print(f"[dim]Parsed {report.total_frames} frames, mapped {report.mapped_frames} to AST[/dim]")
+        if report.similar_issues:
+            console.print(f"[dim]Found {len(report.similar_issues)} similar issues[/dim]")
+
+        driver.close()
+
     except Exception as e:
         console.print(f"[red]Error analyzing stack trace: {e}[/red]")
         if verbose:
