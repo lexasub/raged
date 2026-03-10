@@ -26,8 +26,11 @@ import tree_sitter_typescript as tsts
 from tree_sitter import Language, Parser, Query, QueryCursor, Tree, Node
 
 from ast_rag.models import (
-    ASTNode, ASTEdge,
-    NodeKind, EdgeKind, Language as Lang,
+    ASTNode,
+    ASTEdge,
+    NodeKind,
+    EdgeKind,
+    Language as Lang,
 )
 from ast_rag.language_queries import LANGUAGE_QUERIES
 from ast_rag.parse_cache import ParseCache, SQLiteParseCache
@@ -39,12 +42,19 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 EXT_TO_LANG: dict[str, str] = {
-    ".cpp": "cpp", ".cxx": "cpp", ".cc": "cpp", ".c": "cpp",
-    ".hpp": "cpp", ".hxx": "cpp", ".hh": "cpp", ".h": "cpp",
+    ".cpp": "cpp",
+    ".cxx": "cpp",
+    ".cc": "cpp",
+    ".c": "cpp",
+    ".hpp": "cpp",
+    ".hxx": "cpp",
+    ".hh": "cpp",
+    ".h": "cpp",
     ".java": "java",
     ".rs": "rust",
     ".py": "python",
-    ".ts": "typescript", ".tsx": "typescript",
+    ".ts": "typescript",
+    ".tsx": "typescript",
 }
 
 # ---------------------------------------------------------------------------
@@ -53,19 +63,19 @@ EXT_TO_LANG: dict[str, str] = {
 
 # Maps query name → NodeKind that the query extracts
 QUERY_KIND_MAP: dict[str, NodeKind] = {
-    "class_defs":            NodeKind.CLASS,
-    "interface_defs":        NodeKind.INTERFACE,
-    "struct_defs":           NodeKind.STRUCT,
-    "enum_defs":             NodeKind.ENUM,
-    "trait_defs":            NodeKind.TRAIT,
-    "annotation_type_defs":  NodeKind.INTERFACE,
-    "namespace_defs":        NodeKind.NAMESPACE,
-    "impl_defs":             NodeKind.CLASS,  # Rust impl block mapped to class
-    "function_defs":         NodeKind.FUNCTION,
-    "method_defs":           NodeKind.METHOD,
-    "constructor_defs":      NodeKind.CONSTRUCTOR,
-    "destructor_defs":       NodeKind.DESTRUCTOR,
-    "field_defs":            NodeKind.FIELD,
+    "class_defs": NodeKind.CLASS,
+    "interface_defs": NodeKind.INTERFACE,
+    "struct_defs": NodeKind.STRUCT,
+    "enum_defs": NodeKind.ENUM,
+    "trait_defs": NodeKind.TRAIT,
+    "annotation_type_defs": NodeKind.INTERFACE,
+    "namespace_defs": NodeKind.NAMESPACE,
+    "impl_defs": NodeKind.CLASS,  # Rust impl block mapped to class
+    "function_defs": NodeKind.FUNCTION,
+    "method_defs": NodeKind.METHOD,
+    "constructor_defs": NodeKind.CONSTRUCTOR,
+    "destructor_defs": NodeKind.DESTRUCTOR,
+    "field_defs": NodeKind.FIELD,
 }
 
 
@@ -118,10 +128,10 @@ class ParserManager:
     def _init_languages(self) -> None:
         """Load tree-sitter Language objects from pre-built bindings."""
         lang_defs = {
-            "cpp":        Language(tscpp.language()),
-            "java":       Language(tsjava.language()),
-            "rust":       Language(tsrust.language()),
-            "python":     Language(tspython.language()),
+            "cpp": Language(tscpp.language()),
+            "java": Language(tsjava.language()),
+            "rust": Language(tsrust.language()),
+            "python": Language(tspython.language()),
             "typescript": Language(tsts.language_typescript()),
         }
         for name, lang in lang_defs.items():
@@ -135,7 +145,9 @@ class ParserManager:
                 try:
                     compiled[qname] = Query(lang, qstr)
                 except Exception as exc:
-                    logger.warning("Failed to compile query '%s' for '%s': %s", qname, name, exc)
+                    logger.warning(
+                        "Failed to compile query '%s' for '%s': %s", qname, name, exc
+                    )
             self._compiled_queries[name] = compiled
 
     def detect_language(self, file_path: str) -> Optional[str]:
@@ -207,7 +219,11 @@ class ParserManager:
 
         # Parse (full or incremental).
         parser = self._parsers[lang]
-        tree = parser.parse(source, old_tree) if old_tree is not None else parser.parse(source)
+        tree = (
+            parser.parse(source, old_tree)
+            if old_tree is not None
+            else parser.parse(source)
+        )
 
         # Persist result in cache.
         self._cache.put(abs_path, source, tree)
@@ -276,9 +292,9 @@ class ParserManager:
                     continue
 
                 start_line = node_ts.start_point[0] + 1
-                end_line   = node_ts.end_point[0] + 1
+                end_line = node_ts.end_point[0] + 1
                 start_byte = node_ts.start_byte
-                end_byte   = node_ts.end_byte
+                end_byte = node_ts.end_byte
 
                 dedup_key = (name_text, kind.value, start_line)
                 if dedup_key in seen:
@@ -287,13 +303,17 @@ class ParserManager:
 
                 # Build qualified_name based on file path + class context
                 qname_str = _build_qualified_name(file_path, name_text, lang)
-                src_text   = source[start_byte:end_byte].decode("utf-8", errors="replace")
-                code_hash  = hashlib.sha256(src_text.encode()).hexdigest()[:24]
+                src_text = source[start_byte:end_byte].decode("utf-8", errors="replace")
+                code_hash = hashlib.sha256(src_text.encode()).hexdigest()[:24]
 
                 # Build signature for callables
                 signature: Optional[str] = None
-                if kind in (NodeKind.FUNCTION, NodeKind.METHOD, NodeKind.CONSTRUCTOR,
-                            NodeKind.DESTRUCTOR):
+                if kind in (
+                    NodeKind.FUNCTION,
+                    NodeKind.METHOD,
+                    NodeKind.CONSTRUCTOR,
+                    NodeKind.DESTRUCTOR,
+                ):
                     params_ts = match_dict.get("params") or match_dict.get("parameters")
                     if params_ts:
                         if isinstance(params_ts, list):
@@ -370,48 +390,82 @@ class ParserManager:
         # Simple rule: all Class/Interface/Struct/Enum/Trait nodes are contained by File.
         # All Method/Constructor/Destructor/Function nodes are contained by their enclosing
         # class if one exists with overlapping byte range; otherwise by File.
-        type_nodes   = [n for n in nodes if n.kind in (
-            NodeKind.CLASS, NodeKind.INTERFACE, NodeKind.STRUCT,
-            NodeKind.ENUM, NodeKind.TRAIT, NodeKind.NAMESPACE,
-        )]
-        method_nodes = [n for n in nodes if n.kind in (
-            NodeKind.FUNCTION, NodeKind.METHOD, NodeKind.CONSTRUCTOR, NodeKind.DESTRUCTOR,
-        )]
-        field_nodes  = [n for n in nodes if n.kind == NodeKind.FIELD]
+        type_nodes = [
+            n
+            for n in nodes
+            if n.kind
+            in (
+                NodeKind.CLASS,
+                NodeKind.INTERFACE,
+                NodeKind.STRUCT,
+                NodeKind.ENUM,
+                NodeKind.TRAIT,
+                NodeKind.NAMESPACE,
+            )
+        ]
+        method_nodes = [
+            n
+            for n in nodes
+            if n.kind
+            in (
+                NodeKind.FUNCTION,
+                NodeKind.METHOD,
+                NodeKind.CONSTRUCTOR,
+                NodeKind.DESTRUCTOR,
+            )
+        ]
+        field_nodes = [n for n in nodes if n.kind == NodeKind.FIELD]
 
         for tn in type_nodes:
             ek = _containment_edge_kind(tn.kind)
-            edges.append(ASTEdge(
-                kind=ek, from_id=file_node_id, to_id=tn.id, valid_from=commit_hash,
-            ))
+            edges.append(
+                ASTEdge(
+                    kind=ek,
+                    from_id=file_node_id,
+                    to_id=tn.id,
+                    valid_from=commit_hash,
+                )
+            )
 
         for mn in method_nodes:
             parent = _find_enclosing_type(mn, type_nodes)
             if parent:
-                edges.append(ASTEdge(
-                    kind=EdgeKind.CONTAINS_METHOD, from_id=parent.id, to_id=mn.id,
-                    valid_from=commit_hash,
-                ))
+                edges.append(
+                    ASTEdge(
+                        kind=EdgeKind.CONTAINS_METHOD,
+                        from_id=parent.id,
+                        to_id=mn.id,
+                        valid_from=commit_hash,
+                    )
+                )
             else:
-                edges.append(ASTEdge(
-                    kind=EdgeKind.CONTAINS_FUNCTION, from_id=file_node_id, to_id=mn.id,
-                    valid_from=commit_hash,
-                ))
+                edges.append(
+                    ASTEdge(
+                        kind=EdgeKind.CONTAINS_FUNCTION,
+                        from_id=file_node_id,
+                        to_id=mn.id,
+                        valid_from=commit_hash,
+                    )
+                )
 
         for fn in field_nodes:
             parent = _find_enclosing_type(fn, type_nodes)
             if parent:
-                edges.append(ASTEdge(
-                    kind=EdgeKind.CONTAINS_FIELD, from_id=parent.id, to_id=fn.id,
-                    valid_from=commit_hash,
-                ))
+                edges.append(
+                    ASTEdge(
+                        kind=EdgeKind.CONTAINS_FIELD,
+                        from_id=parent.id,
+                        to_id=fn.id,
+                        valid_from=commit_hash,
+                    )
+                )
 
         # --- Import / Include edges ---
-        import_qname  = "imports" if lang != "cpp" else None
+        import_qname = "imports" if lang != "cpp" else None
         include_qname = "includes" if lang == "cpp" else None
 
         for qname_key, edge_kind in (
-            (import_qname,  EdgeKind.IMPORTS),
+            (import_qname, EdgeKind.IMPORTS),
             (include_qname, EdgeKind.INCLUDES),
         ):
             if qname_key is None:
@@ -420,7 +474,9 @@ class ParserManager:
             if query is None:
                 continue
             for _, md in QueryCursor(query).matches(tree.root_node):
-                path_ts = md.get("import_path") or md.get("path") or md.get("module_path")
+                path_ts = (
+                    md.get("import_path") or md.get("path") or md.get("module_path")
+                )
                 if path_ts is None:
                     continue
                 if isinstance(path_ts, list):
@@ -429,16 +485,18 @@ class ParserManager:
                 if not path_text:
                     continue
                 # target id is synthetic: we use a stable hash for the import target
-                target_id = hashlib.sha256(
-                    f"import:{path_text}".encode()
-                ).hexdigest()[:24]
-                edges.append(ASTEdge(
-                    kind=edge_kind,
-                    from_id=file_node_id,
-                    to_id=target_id,
-                    label=path_text,
-                    valid_from=commit_hash,
-                ))
+                target_id = hashlib.sha256(f"import:{path_text}".encode()).hexdigest()[
+                    :24
+                ]
+                edges.append(
+                    ASTEdge(
+                        kind=edge_kind,
+                        from_id=file_node_id,
+                        to_id=target_id,
+                        label=path_text,
+                        valid_from=commit_hash,
+                    )
+                )
 
         # --- Call edges with enhanced type-based resolution ---
         call_query = compiled.get("calls")
@@ -493,21 +551,34 @@ class ParserManager:
 
         # --- Inheritance / Implements edges ---
         _add_type_relation_edges(
-            edges, tree, compiled, nodes, source, lang, commit_hash, name_to_id,
+            edges,
+            tree,
+            compiled,
+            nodes,
+            source,
+            lang,
+            commit_hash,
+            name_to_id,
         )
 
         # --- DI injection edges (Java-specific) ---
         if lang == "java":
-            injects_edges = self._extract_injects(tree, nodes, file_path, lang, source, commit_hash)
+            injects_edges = self._extract_injects(
+                tree, nodes, file_path, lang, source, commit_hash
+            )
             edges.extend(injects_edges)
 
         # --- New edge types ---
         # DEPENDS_ON edges (C++ #include, Java imports)
-        depends_on_edges = self._extract_depends_on(tree, nodes, file_path, lang, source, commit_hash)
+        depends_on_edges = self._extract_depends_on(
+            tree, nodes, file_path, lang, source, commit_hash
+        )
         edges.extend(depends_on_edges)
 
         # OVERRIDES edges (Java @Override, C++ override keyword)
-        overrides_edges = self._extract_overrides(tree, nodes, lang, source, commit_hash)
+        overrides_edges = self._extract_overrides(
+            tree, nodes, lang, source, commit_hash
+        )
         edges.extend(overrides_edges)
 
         # TYPES edges (type annotations)
@@ -516,7 +587,9 @@ class ParserManager:
 
         # --- Rust-specific edges ---
         if lang == "rust":
-            rust_edges = self._extract_rust_edges(tree, nodes, file_path, source, commit_hash)
+            rust_edges = self._extract_rust_edges(
+                tree, nodes, file_path, source, commit_hash
+            )
             edges.extend(rust_edges)
 
         return edges
@@ -556,7 +629,7 @@ class ParserManager:
                 resolution_method="virtual",
                 valid_from="INIT",
             )
-        
+
         # For Java, check if it's a virtual method call
         elif callee_name and "." in callee_name:
             # This is likely a Java method call
@@ -587,12 +660,18 @@ class ParserManager:
         - Interface method calls
         """
         # Check if receiver is a pointer or reference to a base class
-        receiver_type = self._infer_cpp_receiver_type(receiver_node, None, name_to_id, source)
+        receiver_type = self._infer_cpp_receiver_type(
+            receiver_node, None, name_to_id, source
+        )
         if not receiver_type or not receiver_type.startswith("var:"):
             return None
 
         # Get the callee name
-        callee_name = _node_text(call_node.child_by_field_name("callee_name") or call_node.child_by_field_name("function"), source)
+        callee_name = _node_text(
+            call_node.child_by_field_name("callee_name")
+            or call_node.child_by_field_name("function"),
+            source,
+        )
         if not callee_name:
             return None
 
@@ -623,12 +702,18 @@ class ParserManager:
         - Polymorphic method calls
         """
         # Check if receiver is an interface or abstract class
-        receiver_type = self._infer_java_receiver_type(receiver_node, None, name_to_id, source)
+        receiver_type = self._infer_java_receiver_type(
+            receiver_node, None, name_to_id, source
+        )
         if not receiver_type or receiver_type not in ("this", "super"):
             return None
 
         # Get the callee name
-        callee_name = _node_text(call_node.child_by_field_name("callee_name") or call_node.child_by_field_name("function"), source)
+        callee_name = _node_text(
+            call_node.child_by_field_name("callee_name")
+            or call_node.child_by_field_name("function"),
+            source,
+        )
         if not callee_name:
             return None
 
@@ -684,19 +769,21 @@ class ParserManager:
                     path_text = _node_text(path_ts, source).strip('"<>').strip()
                     if not path_text:
                         continue
-                    
+
                     # Create target ID for the include file
                     target_id = hashlib.sha256(
                         f"include:{path_text}".encode()
                     ).hexdigest()[:24]
-                    
-                    edges.append(ASTEdge(
-                        kind=EdgeKind.DEPENDS_ON,
-                        from_id=file_node_id,
-                        to_id=target_id,
-                        label=path_text,
-                        valid_from=commit_hash,
-                    ))
+
+                    edges.append(
+                        ASTEdge(
+                            kind=EdgeKind.DEPENDS_ON,
+                            from_id=file_node_id,
+                            to_id=target_id,
+                            label=path_text,
+                            valid_from=commit_hash,
+                        )
+                    )
 
         elif lang == "java":
             # Extract import statements
@@ -711,143 +798,163 @@ class ParserManager:
                     import_text = _node_text(import_path_ts, source).strip()
                     if not import_text:
                         continue
-                    
+
                     # Create target ID for the imported module
                     target_id = hashlib.sha256(
                         f"import:{import_text}".encode()
                     ).hexdigest()[:24]
-                    
-                    edges.append(ASTEdge(
-                        kind=EdgeKind.DEPENDS_ON,
-                        from_id=file_node_id,
-                        to_id=target_id,
-                        label=import_text,
-                        valid_from=commit_hash,
-                    ))
+
+                    edges.append(
+                        ASTEdge(
+                            kind=EdgeKind.DEPENDS_ON,
+                            from_id=file_node_id,
+                            to_id=target_id,
+                            label=import_text,
+                            valid_from=commit_hash,
+                        )
+                    )
 
         return edges
 
     def _extract_overrides(
-            self,
-            tree: Tree,
-            nodes: list[ASTNode],
-            lang: str,
-            source: bytes,
-            commit_hash: str,
-        ) -> list[ASTEdge]:
-            """Extract OVERRIDES edges for Java @Override and C++ override keyword.
+        self,
+        tree: Tree,
+        nodes: list[ASTNode],
+        lang: str,
+        source: bytes,
+        commit_hash: str,
+    ) -> list[ASTEdge]:
+        """Extract OVERRIDES edges for Java @Override and C++ override keyword.
 
-            Args:
-                tree: The parsed tree
-                nodes: List of AST nodes in current file
-                lang: Language of the file
-                source: Source bytes
-                commit_hash: Commit hash for versioning
+        Args:
+            tree: The parsed tree
+            nodes: List of AST nodes in current file
+            lang: Language of the file
+            source: Source bytes
+            commit_hash: Commit hash for versioning
 
-            Returns:
-                List of OVERRIDES edges
-            """
-            edges: list[ASTEdge] = []
-            
-            if lang == "java":
-                # Extract methods with @Override annotation
-                override_query = self._compiled_queries.get(lang, {}).get("overrides")
-                if override_query:
-                    for _, md in QueryCursor(override_query).matches(tree.root_node):
-                        method_name_ts = md.get("name")
-                        if method_name_ts is None:
-                            continue
-                        if isinstance(method_name_ts, list):
-                            method_name_ts = method_name_ts[0]
-                        method_name = _node_text(method_name_ts, source)
-                        if not method_name:
-                            continue
-                        
-                        # Find the overriding method node
-                        overriding_node = next((n for n in nodes if n.name == method_name and n.kind == NodeKind.METHOD), None)
-                        if not overriding_node:
-                            continue
-                        
-                        # Create OVERRIDES edge (resolution of overridden method will happen later)
-                        edges.append(ASTEdge(
+        Returns:
+            List of OVERRIDES edges
+        """
+        edges: list[ASTEdge] = []
+
+        if lang == "java":
+            # Extract methods with @Override annotation
+            override_query = self._compiled_queries.get(lang, {}).get("overrides")
+            if override_query:
+                for _, md in QueryCursor(override_query).matches(tree.root_node):
+                    method_name_ts = md.get("name")
+                    if method_name_ts is None:
+                        continue
+                    if isinstance(method_name_ts, list):
+                        method_name_ts = method_name_ts[0]
+                    method_name = _node_text(method_name_ts, source)
+                    if not method_name:
+                        continue
+
+                    # Find the overriding method node
+                    overriding_node = next(
+                        (
+                            n
+                            for n in nodes
+                            if n.name == method_name and n.kind == NodeKind.METHOD
+                        ),
+                        None,
+                    )
+                    if not overriding_node:
+                        continue
+
+                    # Create OVERRIDES edge (resolution of overridden method will happen later)
+                    edges.append(
+                        ASTEdge(
                             kind=EdgeKind.OVERRIDES,
                             from_id=overriding_node.id,
                             to_id="",  # Will be resolved later
                             valid_from=commit_hash,
-                        ))
+                        )
+                    )
 
-            elif lang == "cpp":
-                # Extract methods with override keyword (would need additional query)
-                # This is a placeholder for future implementation
-                pass
+        elif lang == "cpp":
+            # Extract methods with override keyword (would need additional query)
+            # This is a placeholder for future implementation
+            pass
 
-            return edges
+        return edges
 
     def _extract_types(
-            self,
-            tree: Tree,
-            nodes: list[ASTNode],
-            lang: str,
-            source: bytes,
-            commit_hash: str,
-        ) -> list[ASTEdge]:
-            """Extract TYPES edges for type annotations.
+        self,
+        tree: Tree,
+        nodes: list[ASTNode],
+        lang: str,
+        source: bytes,
+        commit_hash: str,
+    ) -> list[ASTEdge]:
+        """Extract TYPES edges for type annotations.
 
-            Args:
-                tree: The parsed tree
-                nodes: List of AST nodes in current file
-                lang: Language of the file
-                source: Source bytes
-                commit_hash: Commit hash for versioning
+        Args:
+            tree: The parsed tree
+            nodes: List of AST nodes in current file
+            lang: Language of the file
+            source: Source bytes
+            commit_hash: Commit hash for versioning
 
-            Returns:
-                List of TYPES edges
-            """
-            edges: list[ASTEdge] = []
-            
-            if lang == "java":
-                # Extract field type annotations
-                field_query = self._compiled_queries.get(lang, {}).get("field_defs")
-                if field_query:
-                    for _, md in QueryCursor(field_query).matches(tree.root_node):
-                        field_name_ts = md.get("name")
-                        field_type_ts = md.get("field_type")
-                        if field_name_ts is None or field_type_ts is None:
-                            continue
-                        if isinstance(field_name_ts, list):
-                            field_name_ts = field_name_ts[0]
-                        if isinstance(field_type_ts, list):
-                            field_type_ts = field_type_ts[0]
-                        
-                        field_name = _node_text(field_name_ts, source)
-                        field_type = _node_text(field_type_ts, source)
-                        if not field_name or not field_type:
-                            continue
-                        
-                        # Find the field node
-                        field_node = next((n for n in nodes if n.name == field_name and n.kind == NodeKind.FIELD), None)
-                        if not field_node:
-                            continue
-                        
-                        # Create target ID for the type
-                        type_id = hashlib.sha256(
-                            f"type:{field_type}".encode()
-                        ).hexdigest()[:24]
-                        
-                        edges.append(ASTEdge(
+        Returns:
+            List of TYPES edges
+        """
+        edges: list[ASTEdge] = []
+
+        if lang == "java":
+            # Extract field type annotations
+            field_query = self._compiled_queries.get(lang, {}).get("field_defs")
+            if field_query:
+                for _, md in QueryCursor(field_query).matches(tree.root_node):
+                    field_name_ts = md.get("name")
+                    field_type_ts = md.get("field_type")
+                    if field_name_ts is None or field_type_ts is None:
+                        continue
+                    if isinstance(field_name_ts, list):
+                        field_name_ts = field_name_ts[0]
+                    if isinstance(field_type_ts, list):
+                        field_type_ts = field_type_ts[0]
+
+                    field_name = _node_text(field_name_ts, source)
+                    field_type = _node_text(field_type_ts, source)
+                    if not field_name or not field_type:
+                        continue
+
+                    # Find the field node
+                    field_node = next(
+                        (
+                            n
+                            for n in nodes
+                            if n.name == field_name and n.kind == NodeKind.FIELD
+                        ),
+                        None,
+                    )
+                    if not field_node:
+                        continue
+
+                    # Create target ID for the type
+                    type_id = hashlib.sha256(f"type:{field_type}".encode()).hexdigest()[
+                        :24
+                    ]
+
+                    edges.append(
+                        ASTEdge(
                             kind=EdgeKind.TYPES,
                             from_id=field_node.id,
                             to_id=type_id,
                             label=field_type,
                             valid_from=commit_hash,
-                        ))
+                        )
+                    )
 
-            elif lang == "cpp":
-                # Extract variable type annotations (would need additional query)
-                # This is a placeholder for future implementation
-                pass
+        elif lang == "cpp":
+            # Extract variable type annotations (would need additional query)
+            # This is a placeholder for future implementation
+            pass
 
-            return edges
+        return edges
 
     def _extract_injects(
         self,
@@ -859,17 +966,17 @@ class ParserManager:
         commit_hash: str,
     ) -> list[ASTEdge]:
         """Extract dependency injection relationships.
-        
+
         Creates INJECTS edges from fields/constructors to injected types.
         """
         edges = []
-        
+
         if lang != "java":
             return edges
-        
+
         compiled = self._compiled_queries.get("java", {})
         nodes_by_name = {n.name: n for n in nodes}
-        
+
         # Field injections (@Autowired, @Inject, @Resource)
         field_query = compiled.get("di_fields")
         if field_query:
@@ -877,18 +984,18 @@ class ParserManager:
                 annotation_ts = match.get("annotation_name")
                 type_ts = match.get("injected_type")
                 field_ts = match.get("field_name")
-                
+
                 if not all([annotation_ts, type_ts, field_ts]):
                     continue
-                
+
                 annotation = _node_text(annotation_ts, source)
                 type_name = _node_text(type_ts, source)
                 field_name = _node_text(field_ts, source)
-                
+
                 # Find the field node and injected type node
                 field_node = next((n for n in nodes if n.name == field_name), None)
                 type_node = nodes_by_name.get(type_name)
-                
+
                 if field_node and type_node:
                     edge = ASTEdge(
                         kind=EdgeKind.INJECTS,
@@ -898,7 +1005,7 @@ class ParserManager:
                         valid_from=commit_hash,
                     )
                     edges.append(edge)
-        
+
         # Constructor injections
         ctor_query = compiled.get("di_constructors")
         if ctor_query:
@@ -906,23 +1013,30 @@ class ParserManager:
                 annotation_ts = match.get("annotation_name")
                 type_ts = match.get("injected_type")
                 node_ts = match.get("node")  # constructor_declaration node
-                
+
                 if not all([annotation_ts, type_ts, node_ts]):
                     continue
-                
+
                 annotation = _node_text(annotation_ts, source)
                 type_name = _node_text(type_ts, source)
-                
+
                 # Extract constructor name from the constructor_declaration node
                 name_ts = node_ts.child_by_field_name("name")
                 if not name_ts:
                     continue
                 ctor_name = _node_text(name_ts, source)
-                
+
                 # Find the constructor node and injected type node
-                ctor_node = next((n for n in nodes if n.name == ctor_name and n.kind == NodeKind.CONSTRUCTOR), None)
+                ctor_node = next(
+                    (
+                        n
+                        for n in nodes
+                        if n.name == ctor_name and n.kind == NodeKind.CONSTRUCTOR
+                    ),
+                    None,
+                )
                 type_node = nodes_by_name.get(type_name)
-                
+
                 if ctor_node and type_node:
                     edge = ASTEdge(
                         kind=EdgeKind.INJECTS,
@@ -932,318 +1046,324 @@ class ParserManager:
                         valid_from=commit_hash,
                     )
                     edges.append(edge)
-        
+
         return edges
 
     def _extract_rust_edges(
-            self,
-            tree: Tree,
-            nodes: list[ASTNode],
-            file_path: str,
-            source: bytes,
-            commit_hash: str,
-        ) -> list[ASTEdge]:
-            """Extract Rust-specific edges: IMPLEMENTS for trait impls.
+        self,
+        tree: Tree,
+        nodes: list[ASTNode],
+        file_path: str,
+        source: bytes,
+        commit_hash: str,
+    ) -> list[ASTEdge]:
+        """Extract Rust-specific edges: IMPLEMENTS for trait impls.
 
-            Creates:
-            - IMPLEMENTS edges: impl Trait for Type → Type implements Trait
-            - Generic constraint edges: where T: Trait → T constrained by Trait
-            """
-            edges: list[ASTEdge] = []
-            
-            # Build lookups
-            nodes_by_name: dict[str, ASTNode] = {n.name: n for n in nodes}
-            
-            # --- IMPLEMENTS edges from impl blocks ---
-            # Look for impl blocks that implement traits
-            impl_blocks_query = self._compiled_queries.get("rust", {}).get("impl_defs")
-            if impl_blocks_query:
-                for _, match in QueryCursor(impl_blocks_query).matches(tree.root_node):
-                    impl_type_ts = match.get("impl_type")
-                    trait_name_ts = match.get("trait_name")
-                    
-                    if impl_type_ts is None or trait_name_ts is None:
-                        continue
-                    
-                    if isinstance(impl_type_ts, list):
-                        impl_type_ts = impl_type_ts[0]
-                    if isinstance(trait_name_ts, list):
-                        trait_name_ts = trait_name_ts[0]
-                    
-                    impl_type_name = _node_text(impl_type_ts, source)
-                    trait_name = _node_text(trait_name_ts, source)
-                    
-                    if not impl_type_name or not trait_name:
-                        continue
-                    
-                    # Find the implementing type node (struct, enum, or class)
-                    impl_node = None
-                    for node in nodes:
-                        if node.name == impl_type_name and node.kind in (
-                            NodeKind.STRUCT, NodeKind.ENUM, NodeKind.CLASS
-                        ):
-                            impl_node = node
-                            break
-                    
-                    # Find the trait node
-                    trait_node = nodes_by_name.get(trait_name)
-                    
-                    if impl_node and trait_node:
-                        edge = ASTEdge(
-                            kind=EdgeKind.IMPLEMENTS,
-                            from_id=impl_node.id,
-                            to_id=trait_node.id,
-                            valid_from=commit_hash,
-                        )
-                        edges.append(edge)
-            
-            # --- WHERE clause constraint edges ---
-            # Extract type bounds from where clauses (optional enhancement)
-            where_query = self._compiled_queries.get("rust", {}).get("where_clauses")
-            if where_query:
-                for _, match in QueryCursor(where_query).matches(tree.root_node):
-                    predicates_ts = match.get("predicates")
-                    if predicates_ts is None:
-                        continue
-                    
-                    if isinstance(predicates_ts, list):
-                        predicates_ts = predicates_ts[0]
-                    
-                    # Extract trait bounds from predicates
-                    # Pattern: where T: Trait + Lifetime
-                    bounds_query = self._compiled_queries.get("rust", {}).get("trait_bounds")
-                    if bounds_query:
-                        for _, bound_match in QueryCursor(bounds_query).matches(predicates_ts):
-                            trait_ts = bound_match.get("trait_name")
-                            if trait_ts:
-                                if isinstance(trait_ts, list):
-                                    trait_ts = trait_ts[0]
-                                trait_name = _node_text(trait_ts, source)
-                                if trait_name:
-                                    # Create TYPES edge for constraint
-                                    # This links the generic parameter to its trait bound
-                                    pass  # Optional enhancement
-            
-            return edges
+        Creates:
+        - IMPLEMENTS edges: impl Trait for Type → Type implements Trait
+        - Generic constraint edges: where T: Trait → T constrained by Trait
+        """
+        edges: list[ASTEdge] = []
+
+        # Build lookups
+        nodes_by_name: dict[str, ASTNode] = {n.name: n for n in nodes}
+
+        # --- IMPLEMENTS edges from impl blocks ---
+        # Look for impl blocks that implement traits
+        impl_blocks_query = self._compiled_queries.get("rust", {}).get("impl_defs")
+        if impl_blocks_query:
+            for _, match in QueryCursor(impl_blocks_query).matches(tree.root_node):
+                impl_type_ts = match.get("impl_type")
+                trait_name_ts = match.get("trait_name")
+
+                if impl_type_ts is None or trait_name_ts is None:
+                    continue
+
+                if isinstance(impl_type_ts, list):
+                    impl_type_ts = impl_type_ts[0]
+                if isinstance(trait_name_ts, list):
+                    trait_name_ts = trait_name_ts[0]
+
+                impl_type_name = _node_text(impl_type_ts, source)
+                trait_name = _node_text(trait_name_ts, source)
+
+                if not impl_type_name or not trait_name:
+                    continue
+
+                # Find the implementing type node (struct, enum, or class)
+                impl_node = None
+                for node in nodes:
+                    if node.name == impl_type_name and node.kind in (
+                        NodeKind.STRUCT,
+                        NodeKind.ENUM,
+                        NodeKind.CLASS,
+                    ):
+                        impl_node = node
+                        break
+
+                # Find the trait node
+                trait_node = nodes_by_name.get(trait_name)
+
+                if impl_node and trait_node:
+                    edge = ASTEdge(
+                        kind=EdgeKind.IMPLEMENTS,
+                        from_id=impl_node.id,
+                        to_id=trait_node.id,
+                        valid_from=commit_hash,
+                    )
+                    edges.append(edge)
+
+        # --- WHERE clause constraint edges ---
+        # Extract type bounds from where clauses (optional enhancement)
+        where_query = self._compiled_queries.get("rust", {}).get("where_clauses")
+        if where_query:
+            for _, match in QueryCursor(where_query).matches(tree.root_node):
+                predicates_ts = match.get("predicates")
+                if predicates_ts is None:
+                    continue
+
+                if isinstance(predicates_ts, list):
+                    predicates_ts = predicates_ts[0]
+
+                # Extract trait bounds from predicates
+                # Pattern: where T: Trait + Lifetime
+                bounds_query = self._compiled_queries.get("rust", {}).get(
+                    "trait_bounds"
+                )
+                if bounds_query:
+                    for _, bound_match in QueryCursor(bounds_query).matches(
+                        predicates_ts
+                    ):
+                        trait_ts = bound_match.get("trait_name")
+                        if trait_ts:
+                            if isinstance(trait_ts, list):
+                                trait_ts = trait_ts[0]
+                            trait_name = _node_text(trait_ts, source)
+                            if trait_name:
+                                # Create TYPES edge for constraint
+                                # This links the generic parameter to its trait bound
+                                pass  # Optional enhancement
+
+        return edges
 
     def _track_lambda_calls(
-            self,
-            call_node: Node,
-            name_to_id: dict[str, str],
-            callee_name: str,
-            caller_id: str,
-        ) -> Optional[ASTEdge]:
-            """Track lambda/closure calls.
+        self,
+        call_node: Node,
+        name_to_id: dict[str, str],
+        callee_name: str,
+        caller_id: str,
+    ) -> Optional[ASTEdge]:
+        """Track lambda/closure calls.
 
-            Args:
-                call_node: The call expression node
-                name_to_id: Mapping of symbol names to node IDs
-                callee_name: The name of the callee (already extracted)
-                caller_id: ID of the calling function/method
+        Args:
+            call_node: The call expression node
+            name_to_id: Mapping of symbol names to node IDs
+            callee_name: The name of the callee (already extracted)
+            caller_id: ID of the calling function/method
 
-            Returns:
-                ASTEdge with LAMBDA_CALL kind, or None if not a lambda call
-            """
-            # Check if callee is a lambda/closure
-            if self._is_lambda_or_closure(callee_name, "cpp"):
-                # Find the lambda definition
-                lambda_node_id = name_to_id.get(callee_name)
-                if lambda_node_id:
-                    return ASTEdge(
-                        kind=EdgeKind.LAMBDA_CALL,
-                        from_id=caller_id,
-                        to_id=lambda_node_id,
-                        confidence=1.0,
-                        resolution_method="lambda",
-                        valid_from="INIT",
-                    )
-
-            return None
-
-    def _is_lambda_or_closure(
-            self,
-            name: str,
-            lang: str,
-        ) -> bool:
-            """Check if a name represents a lambda or closure.
-
-            Args:
-                name: The symbol name
-                lang: Language of the symbol
-
-            Returns:
-                True if the name represents a lambda/closure
-            """
-            if lang == "cpp":
-                return name.startswith("lambda") or name.startswith("\\lambda")
-            elif lang == "java":
-                return name.startswith("lambda$") or name.startswith("\\$lambda")
-            elif lang == "rust":
-                return name.startswith("||") or name.startswith("move ||")
-            
-            return False
-
-    def _resolve_cross_file_symbols(
-            self,
-            tree: Tree,
-            nodes: list[ASTNode],
-            file_path: str,
-            lang: str,
-            source: bytes,
-            commit_hash: str,
-        ) -> list[ASTEdge]:
-            """Resolve cross-file symbol references.
-
-            Args:
-                tree: The parsed tree
-                nodes: List of AST nodes in current file
-                file_path: Current file path
-                lang: Language of the file
-                source: Source bytes
-                commit_hash: Commit hash for versioning
-
-            Returns:
-                List of CROSS_FILE_CALL edges
-            """
-            edges: list[ASTEdge] = []
-            
-            if lang not in ("cpp", "java", "rust"):
-                return edges
-
-            # Look for cross-file references in the AST
-            for node in tree.root_node.children:
-                if node.type in ("identifier", "path_expression"):
-                    symbol_name = _node_text(node, source)
-                    # Check if this is a cross-file reference
-                    if self._is_cross_file_reference(symbol_name, lang, file_path):
-                        # Try to resolve the symbol
-                        resolved_edge = self._resolve_cross_file_symbol(
-                            symbol_name, nodes, lang, source
-                        )
-                        if resolved_edge:
-                            edges.append(resolved_edge)
-
-            return edges
-
-    def _is_cross_file_reference(
-            self,
-            symbol_name: str,
-            lang: str,
-            current_file: str,
-        ) -> bool:
-            """Check if a symbol reference is cross-file.
-
-            Args:
-                symbol_name: The symbol name
-                lang: Language of the symbol
-                current_file: Current file path
-
-            Returns:
-                True if the symbol is likely defined in another file
-            """
-            if lang == "cpp":
-                # Check for fully qualified names or external includes
-                return "::" in symbol_name or self._is_external_include(symbol_name, current_file)
-            elif lang == "java":
-                # Check for fully qualified class names
-                return "." in symbol_name and not symbol_name.startswith("java.")
-            elif lang == "rust":
-                # Check for external crate references
-                return "::" in symbol_name and not symbol_name.startswith("crate::")
-            
-            return False
-
-    def _is_external_include(
-            self,
-            symbol_name: str,
-            current_file: str,
-        ) -> bool:
-            """Check if a symbol is from an external include.
-
-            Args:
-                symbol_name: The symbol name
-                current_file: Current file path
-
-            Returns:
-                True if the symbol is from an external include
-            """
-            # This would need access to the actual include graph
-            # For now, we'll use a simple heuristic
-            external_headers = ["stdio.h", "stdlib.h", "string.h", "vector", "iostream"]
-            return any(symbol_name.startswith(header) for header in external_headers)
-
-    def _resolve_cross_file_symbol(
-            self,
-            symbol_name: str,
-            nodes: list[ASTNode],
-            lang: str,
-            source: bytes,
-        ) -> Optional[ASTEdge]:
-            """Resolve a cross-file symbol reference.
-
-            Args:
-                symbol_name: The symbol name
-                nodes: List of AST nodes in current file
-                lang: Language of the file
-                source: Source bytes
-
-            Returns:
-                ASTEdge with CROSS_FILE_CALL kind, or None if cannot resolve
-            """
-            # Try to find the symbol definition in the current index
-            # This is a simplified implementation - in a real system,
-            # we'd query the global symbol table or use semantic search
-            
-            # For now, we'll create a synthetic edge with low confidence
-            confidence = 0.3  # Low confidence for cross-file resolution
-            
-            # Create a synthetic target ID for the cross-file symbol
-            target_id = hashlib.sha256(
-                f"crossfile:{symbol_name}".encode()
-            ).hexdigest()[:24]
-            
-            return ASTEdge(
-                kind=EdgeKind.CROSS_FILE_CALL,
-                from_id="",  # Will be set by caller
-                to_id=target_id,
-                label=symbol_name,
-                confidence=confidence,
-                resolution_method="crossfile",
-                valid_from="INIT",
-            )
-
-    def _resolve_call_with_types(
-            self,
-            call_node: Node,
-            name_to_id: dict[str, str],
-            callee_name: str,
-            caller_id: str,
-        ) -> Optional[ASTEdge]:
-            """Resolve call target using type information from receiver and arguments.
-
-            Args:
-                call_node: The call expression node
-                name_to_id: Mapping of symbol names to node IDs
-                callee_name: The name of the callee (already extracted)
-                caller_id: ID of the calling function/method
-
-            Returns:
-                ASTEdge with CALLS kind and confidence score, or None if resolution fails
-            """
-            # Simplified version - perform name-based resolution with confidence
-            callee_node_id = name_to_id.get(callee_name)
-            if callee_node_id:
-                # Use moderate confidence for name-based resolution
-                confidence = 0.7
+        Returns:
+            ASTEdge with LAMBDA_CALL kind, or None if not a lambda call
+        """
+        # Check if callee is a lambda/closure
+        if self._is_lambda_or_closure(callee_name, "cpp"):
+            # Find the lambda definition
+            lambda_node_id = name_to_id.get(callee_name)
+            if lambda_node_id:
                 return ASTEdge(
-                    kind=EdgeKind.CALLS,
+                    kind=EdgeKind.LAMBDA_CALL,
                     from_id=caller_id,
-                    to_id=callee_node_id,
-                    confidence=confidence,
-                    resolution_method="name",
+                    to_id=lambda_node_id,
+                    confidence=1.0,
+                    resolution_method="lambda",
                     valid_from="INIT",
                 )
-            return None
+
+        return None
+
+    def _is_lambda_or_closure(
+        self,
+        name: str,
+        lang: str,
+    ) -> bool:
+        """Check if a name represents a lambda or closure.
+
+        Args:
+            name: The symbol name
+            lang: Language of the symbol
+
+        Returns:
+            True if the name represents a lambda/closure
+        """
+        if lang == "cpp":
+            return name.startswith("lambda") or name.startswith("\\lambda")
+        elif lang == "java":
+            return name.startswith("lambda$") or name.startswith("\\$lambda")
+        elif lang == "rust":
+            return name.startswith("||") or name.startswith("move ||")
+
+        return False
+
+    def _resolve_cross_file_symbols(
+        self,
+        tree: Tree,
+        nodes: list[ASTNode],
+        file_path: str,
+        lang: str,
+        source: bytes,
+        commit_hash: str,
+    ) -> list[ASTEdge]:
+        """Resolve cross-file symbol references.
+
+        Args:
+            tree: The parsed tree
+            nodes: List of AST nodes in current file
+            file_path: Current file path
+            lang: Language of the file
+            source: Source bytes
+            commit_hash: Commit hash for versioning
+
+        Returns:
+            List of CROSS_FILE_CALL edges
+        """
+        edges: list[ASTEdge] = []
+
+        if lang not in ("cpp", "java", "rust"):
+            return edges
+
+        # Look for cross-file references in the AST
+        for node in tree.root_node.children:
+            if node.type in ("identifier", "path_expression"):
+                symbol_name = _node_text(node, source)
+                # Check if this is a cross-file reference
+                if self._is_cross_file_reference(symbol_name, lang, file_path):
+                    # Try to resolve the symbol
+                    resolved_edge = self._resolve_cross_file_symbol(
+                        symbol_name, nodes, lang, source
+                    )
+                    if resolved_edge:
+                        edges.append(resolved_edge)
+
+        return edges
+
+    def _is_cross_file_reference(
+        self,
+        symbol_name: str,
+        lang: str,
+        current_file: str,
+    ) -> bool:
+        """Check if a symbol reference is cross-file.
+
+        Args:
+            symbol_name: The symbol name
+            lang: Language of the symbol
+            current_file: Current file path
+
+        Returns:
+            True if the symbol is likely defined in another file
+        """
+        if lang == "cpp":
+            # Check for fully qualified names or external includes
+            return "::" in symbol_name or self._is_external_include(
+                symbol_name, current_file
+            )
+        elif lang == "java":
+            # Check for fully qualified class names
+            return "." in symbol_name and not symbol_name.startswith("java.")
+        elif lang == "rust":
+            # Check for external crate references
+            return "::" in symbol_name and not symbol_name.startswith("crate::")
+
+        return False
+
+    def _is_external_include(
+        self,
+        symbol_name: str,
+        current_file: str,
+    ) -> bool:
+        """Check if a symbol is from an external include.
+
+        Args:
+            symbol_name: The symbol name
+            current_file: Current file path
+
+        Returns:
+            True if the symbol is from an external include
+        """
+        # This would need access to the actual include graph
+        # For now, we'll use a simple heuristic
+        external_headers = ["stdio.h", "stdlib.h", "string.h", "vector", "iostream"]
+        return any(symbol_name.startswith(header) for header in external_headers)
+
+    def _resolve_cross_file_symbol(
+        self,
+        symbol_name: str,
+        nodes: list[ASTNode],
+        lang: str,
+        source: bytes,
+    ) -> Optional[ASTEdge]:
+        """Resolve a cross-file symbol reference.
+
+        Args:
+            symbol_name: The symbol name
+            nodes: List of AST nodes in current file
+            lang: Language of the file
+            source: Source bytes
+
+        Returns:
+            ASTEdge with CROSS_FILE_CALL kind, or None if cannot resolve
+        """
+        # Try to find the symbol definition in the current index
+        # This is a simplified implementation - in a real system,
+        # we'd query the global symbol table or use semantic search
+
+        # For now, we'll create a synthetic edge with low confidence
+        confidence = 0.3  # Low confidence for cross-file resolution
+
+        # Create a synthetic target ID for the cross-file symbol
+        target_id = hashlib.sha256(f"crossfile:{symbol_name}".encode()).hexdigest()[:24]
+
+        return ASTEdge(
+            kind=EdgeKind.CROSS_FILE_CALL,
+            from_id="",  # Will be set by caller
+            to_id=target_id,
+            label=symbol_name,
+            confidence=confidence,
+            resolution_method="crossfile",
+            valid_from="INIT",
+        )
+
+    def _resolve_call_with_types(
+        self,
+        call_node: Node,
+        name_to_id: dict[str, str],
+        callee_name: str,
+        caller_id: str,
+    ) -> Optional[ASTEdge]:
+        """Resolve call target using type information from receiver and arguments.
+
+        Args:
+            call_node: The call expression node
+            name_to_id: Mapping of symbol names to node IDs
+            callee_name: The name of the callee (already extracted)
+            caller_id: ID of the calling function/method
+
+        Returns:
+            ASTEdge with CALLS kind and confidence score, or None if resolution fails
+        """
+        # Simplified version - perform name-based resolution with confidence
+        callee_node_id = name_to_id.get(callee_name)
+        if callee_node_id:
+            # Use moderate confidence for name-based resolution
+            confidence = 0.7
+            return ASTEdge(
+                kind=EdgeKind.CALLS,
+                from_id=caller_id,
+                to_id=callee_node_id,
+                confidence=confidence,
+                resolution_method="name",
+                valid_from="INIT",
+            )
+        return None
 
     def _infer_receiver_type(
         self,
@@ -1275,9 +1395,13 @@ class ParserManager:
 
         # Handle different receiver patterns
         if lang == "java":
-            return self._infer_java_receiver_type(receiver_node, tree, name_to_id, source)
+            return self._infer_java_receiver_type(
+                receiver_node, tree, name_to_id, source
+            )
         elif lang == "cpp":
-            return self._infer_cpp_receiver_type(receiver_node, tree, name_to_id, source)
+            return self._infer_cpp_receiver_type(
+                receiver_node, tree, name_to_id, source
+            )
         return None
 
     def _infer_java_receiver_type(
@@ -1378,7 +1502,7 @@ class ParserManager:
         """
         segments = []
         current = path_node
-        
+
         while current:
             if current.type == "identifier":
                 segments.append(_node_text(current, source))
@@ -1390,10 +1514,10 @@ class ParserManager:
                 current = current.child_by_field_name("prefix")
             else:
                 break
-        
+
         if segments:
             return "::".join(reversed(segments))
-        
+
         return None
 
     def _infer_rust_type_from_annotation(
@@ -1414,12 +1538,12 @@ class ParserManager:
         type_node = var_node.child_by_field_name("type")
         if type_node:
             return self._extract_rust_type_from_path(type_node, source)
-        
+
         # Look for initializer expression
         initializer = var_node.child_by_field_name("initializer")
         if initializer:
             return self._infer_rust_type_from_expression(initializer, source)
-        
+
         return None
 
     def _infer_rust_type_from_expression(
@@ -1439,23 +1563,23 @@ class ParserManager:
             callee = expr_node.child_by_field_name("callee")
             if callee and callee.type == "path_expression":
                 return self._extract_rust_type_from_path(callee, source)
-        
+
         elif expr_node.type == "struct_expression":
             path = expr_node.child_by_field_name("path")
             if path:
                 return self._extract_rust_type_from_path(path, source)
-        
+
         elif expr_node.type == "identifier":
             text = _node_text(expr_node, source)
             if text in ("true", "false"):
                 return "bool"
-        
+
         elif expr_node.type == "integer_literal":
             return "i32"  # Default integer type
-        
+
         elif expr_node.type == "string_literal":
             return "String"
-        
+
         return None
 
     def _filter_by_receiver_type(
@@ -1481,7 +1605,11 @@ class ParserManager:
         # This is a simplified implementation - in a full version,
         # we'd need access to type definitions and inheritance hierarchies
         filtered = {}
-        callee_name = _node_text(call_node.child_by_field_name("callee_name") or call_node.child_by_field_name("function"), source)
+        callee_name = _node_text(
+            call_node.child_by_field_name("callee_name")
+            or call_node.child_by_field_name("function"),
+            source,
+        )
 
         for name, node_id in name_to_id.items():
             if name == callee_name:
@@ -1535,7 +1663,9 @@ class ParserManager:
             The best matching candidate name, or None if no clear match
         """
         # Get argument list from call expression
-        args_node = call_node.child_by_field_name("arguments") or call_node.child_by_field_name("parameter_list")
+        args_node = call_node.child_by_field_name(
+            "arguments"
+        ) or call_node.child_by_field_name("parameter_list")
         if not args_node:
             return None
 
@@ -1552,9 +1682,14 @@ class ParserManager:
 # Helper functions (module-private)
 # ---------------------------------------------------------------------------
 
+
 def _node_text(node: Node, source: bytes) -> str:
     """Extract the UTF-8 text for a tree-sitter node."""
-    return source[node.start_byte:node.end_byte].decode("utf-8", errors="replace").strip()
+    return (
+        source[node.start_byte : node.end_byte]
+        .decode("utf-8", errors="replace")
+        .strip()
+    )
 
 
 def _build_qualified_name(file_path: str, name: str, lang: str) -> str:
@@ -1639,10 +1774,15 @@ def _add_type_relation_edges(
             base_id = name_to_id.get(base_name)
             if base_id:
                 ek = EdgeKind.EXTENDS if lang == "java" else EdgeKind.INHERITS
-                edges.append(ASTEdge(
-                    kind=ek, from_id=cls_id, to_id=base_id,
-                    label=base_name, valid_from=commit_hash,
-                ))
+                edges.append(
+                    ASTEdge(
+                        kind=ek,
+                        from_id=cls_id,
+                        to_id=base_id,
+                        label=base_name,
+                        valid_from=commit_hash,
+                    )
+                )
 
         # Java interfaces
         for key in ("iface",):
@@ -1654,15 +1794,21 @@ def _add_type_relation_edges(
                 iface_name = _node_text(iface_ts, source)
                 iface_id = name_to_id.get(iface_name)
                 if iface_id:
-                    edges.append(ASTEdge(
-                        kind=EdgeKind.IMPLEMENTS, from_id=cls_id, to_id=iface_id,
-                        label=iface_name, valid_from=commit_hash,
-                    ))
+                    edges.append(
+                        ASTEdge(
+                            kind=EdgeKind.IMPLEMENTS,
+                            from_id=cls_id,
+                            to_id=iface_id,
+                            label=iface_name,
+                            valid_from=commit_hash,
+                        )
+                    )
 
 
 # ---------------------------------------------------------------------------
 # Convenience: walk a directory and yield (file_path, lang) pairs
 # ---------------------------------------------------------------------------
+
 
 def walk_source_files(
     root: str,
@@ -1674,15 +1820,21 @@ def walk_source_files(
     """
     if exclude_dirs is None:
         exclude_dirs = [
-            ".git", "__pycache__", "node_modules", "target", "build",
-            "dist", ".gradle", ".idea", ".vscode",
+            ".git",
+            "__pycache__",
+            "node_modules",
+            "target",
+            "build",
+            "dist",
+            ".gradle",
+            ".idea",
+            ".vscode",
         ]
     result: list[tuple[str, str]] = []
     for dirpath, dirnames, filenames in os.walk(root):
         # Prune excluded directories in-place
         dirnames[:] = [
-            d for d in dirnames
-            if d not in exclude_dirs and not d.startswith(".")
+            d for d in dirnames if d not in exclude_dirs and not d.startswith(".")
         ]
         for fname in filenames:
             ext = Path(fname).suffix.lower()
