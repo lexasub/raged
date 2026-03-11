@@ -1,4 +1,29 @@
 {
+  "summarizer": {
+    "enabled": true,
+    "llm": {
+      "base_url": "http://192.168.2.109:1113/v1",
+      "model": "qwen2.5-coder:14b",
+      "api_key": "ollama",
+      "timeout": 120,
+      "temperature": 0.1
+    },
+    "cache": {
+      "enabled": true,
+      "path": ".ast_rag_summary_cache.json",
+      "max_entries": 1000
+    },
+    "context": {
+      "max_callers": 5,
+      "max_callees": 5,
+      "include_signature": true,
+      "include_source": true
+    },
+    "output": {
+      "default_format": "markdown",
+      "include_metadata": true
+    }
+  },
   "parse_cache": {
     "max_entries": 5000,
     "max_size_mb": 512,
