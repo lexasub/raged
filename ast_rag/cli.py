@@ -3,6 +3,7 @@ cli.py - Typer-based CLI for AST-RAG.
 
 Commands:
   init   <path>                     Full indexing of a codebase
+  create-database <name>           Create a new Neo4j database
   update <path> --from OLD --to NEW Incremental update from git diff
   query  "<text>"                   Semantic search
   goto   <qualified_name>           Find definition
@@ -30,13 +31,13 @@ import typer
 from rich.console import Console
 
 from ast_rag.models import ProjectConfig
-from ast_rag.ast_parser import ParserManager, walk_source_files
-from ast_rag.graph_schema import apply_schema, create_driver
-from ast_rag.graph_updater import full_index, update_from_git, get_workspace_diff, apply_workspace_diff
-from ast_rag.embeddings import EmbeddingManager
+from ast_rag.services.parsing.parser_manager import ParserManager, walk_source_files
+from ast_rag.repositories import apply_schema, create_driver
+from ast_rag.services.graph_updater_service import full_index, update_from_git, get_workspace_diff, apply_workspace_diff
+from ast_rag.services.embedding_manager import EmbeddingManager
 from ast_rag.services.api import ASTRagAPI
-from ast_rag.output import get_formatter
-from ast_rag.summarizer import SummarizerService
+from ast_rag.utils.output import get_formatter
+from ast_rag.services.summarizer_service import SummarizerService
 
 app = typer.Typer(
     name="ast-rag",
@@ -112,7 +113,7 @@ def init(
         apply_schema(driver)
 
     # 2. Parse all source files
-    pm = ParserManager()
+    pm = ParserManager(project_id=cfg.neo4j.project_id)
     files = walk_source_files(root, exclude_dirs=cfg.exclude_patterns)
     console.print(f"Found [bold]{len(files)}[/bold] source files.")
 
@@ -149,10 +150,10 @@ def init(
     # 3. Write to Neo4j
     with console.status("Writing to Neo4j..."):
         full_index(driver, all_nodes, all_edges, commit_hash=commit)
-        
+
         # Store blocks and CONTAINS_BLOCK edges
         if all_blocks:
-            from ast_rag.graph_updater import batch_upsert_blocks, batch_upsert_block_edges
+            from ast_rag.services.graph_updater_service import batch_upsert_blocks, batch_upsert_block_edges
             with driver.session() as session:
                 batch_upsert_blocks(session, all_blocks, commit_hash)
                 batch_upsert_block_edges(session, all_block_edges)
@@ -167,6 +168,74 @@ def init(
     console.print(f"[green]Indexed {count} node embeddings.[/green]")
 
     console.rule("[bold green]Done[/bold green]")
+
+
+# ---------------------------------------------------------------------------
+# create-database command
+# ---------------------------------------------------------------------------
+
+
+@app.command()
+def create_database(
+    database_name: str = typer.Argument(..., help="Name of the Neo4j database to create"),
+    config: Optional[str] = typer.Option(None, "--config", "-c", help="Path to config JSON"),
+    verbose: bool = typer.Option(False, "--verbose", "-v"),
+) -> None:
+    """
+    Create a new Neo4j database.
+
+    If the database already exists, it will be skipped.
+
+    Examples:
+
+      ast-rag create-database my_project
+      ast-rag create-database lrp --config ast_rag_config.json
+    """
+    if verbose:
+        logging.basicConfig(level=logging.DEBUG)
+    else:
+        logging.basicConfig(level=logging.INFO)
+
+    cfg = _load_config(config)
+
+    console.rule(f"[bold blue]Create Neo4j Database[/bold blue] {database_name}")
+    console.print(f"Neo4j URI: {cfg.neo4j.uri}")
+    console.print(f"Database: {database_name}")
+
+    from neo4j import GraphDatabase
+    from neo4j.exceptions import ClientError
+
+    # Connect to default database
+    driver = GraphDatabase.driver(
+        cfg.neo4j.uri,
+        auth=(cfg.neo4j.user, cfg.neo4j.password),
+        database="neo4j",
+    )
+
+    try:
+        with driver.session(database="neo4j") as session:
+            # Check if database exists
+            result = session.run(
+                "SHOW DATABASES WHERE name = $name",
+                name=database_name,
+            )
+            db_info = result.single()
+
+            if db_info is None:
+                console.print("[yellow]Database does not exist. Creating...[/yellow]")
+                session.run(f"CREATE DATABASE `{database_name}`")
+                console.print(f"[green]Database '{database_name}' created successfully.[/green]")
+            else:
+                current_status = db_info.get("currentStatus", "unknown")
+                console.print(f"[green]Database '{database_name}' already exists (status: {current_status}).[/green]")
+    except ClientError as exc:
+        console.print(f"[red]Neo4j error: {exc.code} - {exc.message}[/red]")
+        raise typer.Exit(1)
+    except Exception as exc:
+        console.print(f"[red]Error: {exc}[/red]")
+        raise typer.Exit(1)
+    finally:
+        driver.close()
 
 
 # ---------------------------------------------------------------------------
@@ -608,8 +677,8 @@ def evaluate(
     from pathlib import Path
 
     from ast_rag.services.api import ASTRagAPI
-    from ast_rag.graph_schema import create_driver
-    from ast_rag.embeddings import EmbeddingManager
+    from ast_rag.repositories import create_driver
+    from ast_rag.services.embedding_manager import EmbeddingManager
 
     # Load configuration
     cfg = _load_config(config)
@@ -927,9 +996,9 @@ def index_folder(
     from concurrent.futures import ProcessPoolExecutor, as_completed
     from pathlib import Path
 
-    from ast_rag.ast_parser import ParserManager, EXT_TO_LANG
-    from ast_rag.graph_schema import create_driver, apply_schema
-    from ast_rag.graph_updater import _nodes_to_batch_by_label, batch_upsert_nodes, batch_upsert_edges
+    from ast_rag.services.parsing.parser_manager import ParserManager, EXT_TO_LANG
+    from ast_rag.repositories import create_driver, apply_schema
+    from ast_rag.services.graph_updater_service import _nodes_to_batch_by_label, batch_upsert_nodes, batch_upsert_edges
 
     cfg = _load_config(config)
     folder_path = Path(path).resolve()
@@ -939,6 +1008,11 @@ def index_folder(
         return
 
     console.rule(f"[bold blue]INDEXING FOLDER[/bold blue]: {folder_path}")
+    console.print(f"Project ID: {cfg.neo4j.project_id}")
+
+    # Set project ID for worker processes
+    import os
+    os.environ["AST_RAG_PROJECT_ID"] = cfg.neo4j.project_id
 
     # Connect to Neo4j
     console.print("[yellow]Connecting to Neo4j...[/yellow]")
@@ -978,8 +1052,9 @@ def index_folder(
     def parse_file(args):
         file_path, lang, source = args
         commit = os.environ.get("AST_RAG_COMMIT", "INIT")
+        project_id = os.environ.get("AST_RAG_PROJECT_ID", "default")
         try:
-            pm = ParserManager()
+            pm = ParserManager(project_id=project_id)
             tree = pm.parse_file(file_path, source=source)
             if tree is None:
                 return (file_path, [], [])

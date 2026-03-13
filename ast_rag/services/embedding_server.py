@@ -6,10 +6,10 @@ instead of loading the model locally.
 
 Usage on the GPU machine:
     pip install fastapi uvicorn sentence-transformers torch
-    python -m ast_rag.embedding_server --model BAAI/bge-m3 --device cuda --port 8765
+    python -m ast_rag.services.embedding_server --model BAAI/bge-m3 --device cuda --port 8765
 
 Or with uvicorn directly:
-    uvicorn ast_rag.embedding_server:app --host 0.0.0.0 --port 8765
+    uvicorn ast_rag.services.embedding_server:app --host 0.0.0.0 --port 8765
 
 API endpoints:
     GET  /health          → {"status": "ok", "model": "...", "dim": 1024}
@@ -151,7 +151,7 @@ def main() -> None:
     """Run the embedding server from the command line.
 
     Example:
-        python -m ast_rag.embedding_server --model BAAI/bge-m3 --device cuda --port 8765
+        python -m ast_rag.services.embedding_server --model BAAI/bge-m3 --device cuda --port 8765
     """
     import argparse
 
@@ -172,7 +172,7 @@ def main() -> None:
 
     logging.basicConfig(level=logging.INFO)
     uvicorn.run(
-        "ast_rag.embedding_server:app",
+        "ast_rag.services.embedding_server:app",
         host=args.host,
         port=args.port,
         workers=args.workers,

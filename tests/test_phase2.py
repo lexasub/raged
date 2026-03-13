@@ -115,7 +115,7 @@ print("=" * 80)
 
 print("\n2.1 compute_diff_for_commits has dry_run...")
 try:
-    from ast_rag.graph_updater import compute_diff_for_commits
+    from ast_rag.services.graph_updater_service import compute_diff_for_commits
     import inspect
     sig = inspect.signature(compute_diff_for_commits)
     params = list(sig.parameters.keys())
@@ -404,9 +404,9 @@ except Exception as e:
 
 print("\n5.3 _extract_injects method...")
 try:
-    from ast_rag.ast_parser import ParserManager
+    from ast_rag.services.parsing.parser_manager import ParserManager
     import inspect
-    
+
     # Check method exists
     has_method = hasattr(ParserManager, "_extract_injects")
     test("_extract_injects method exists", has_method)
@@ -422,9 +422,9 @@ except Exception as e:
 
 print("\n5.4 DI queries compile...")
 try:
-    from ast_rag.ast_parser import ParserManager
+    from ast_rag.services.parsing.parser_manager import ParserManager
     pm = ParserManager()
-    
+
     java_queries = pm._compiled_queries.get("java", {})
     test("Java queries compiled", len(java_queries) > 0)
     test("  - di_fields compiled", "di_fields" in java_queries)

@@ -18,7 +18,7 @@ from ast_rag.models import Neo4jConfig
 logger = logging.getLogger(__name__)
 
 # Path to the CQL schema file relative to the project root
-_SCHEMA_FILE = Path(__file__).parent / "schema" / "graph_schema.cql"
+_SCHEMA_FILE = Path(__file__).parent.parent / "schema" / "graph_schema.cql"
 
 # Labels that correspond to callable code entities (for query filtering)
 CALLABLE_LABELS = frozenset(["Function", "Method", "Constructor", "Destructor"])
@@ -29,14 +29,90 @@ TYPE_LABELS = frozenset(["Class", "Interface", "Struct", "Enum", "Trait"])
 # All AST entity labels (excludes Project/Package/File/CurrentVersion)
 ALL_ENTITY_LABELS = CALLABLE_LABELS | TYPE_LABELS | frozenset(["Field", "Parameter", "Namespace"])
 
+# Mapping from node kind to Neo4j label
+_KIND_TO_LABEL: dict[str, str] = {
+    "Project":     "Project",
+    "Package":     "Package",
+    "Namespace":   "Namespace",
+    "Module":      "Module",
+    "File":        "File",
+    "Class":       "Class",
+    "Interface":   "Interface",
+    "Struct":      "Struct",
+    "Enum":        "Enum",
+    "Trait":       "Trait",
+    "Function":    "Function",
+    "Method":      "Method",
+    "Constructor": "Constructor",
+    "Destructor":  "Destructor",
+    "Field":       "Field",
+    "Variable":    "Variable",
+    "Parameter":   "Parameter",
+}
 
-def create_driver(config: Neo4jConfig) -> Driver:
-    """Create and return a Neo4j driver instance."""
-    return GraphDatabase.driver(
+
+def create_driver(config: Neo4jConfig, create_if_not_exists: bool = True) -> Driver:
+    """Create and return a Neo4j driver instance.
+
+    Args:
+        config: Neo4j configuration
+        create_if_not_exists: If True, create database if it doesn't exist (Enterprise only)
+
+    Returns:
+        Neo4j Driver instance
+
+    Note:
+        In Neo4j Community Edition, only the default 'neo4j' database is available.
+        Multi-database features require Enterprise Edition.
+    """
+    # Connect to default database first
+    driver = GraphDatabase.driver(
         config.uri,
         auth=(config.user, config.password),
-        database=config.database,
+        database="neo4j",
     )
+
+    if create_if_not_exists and config.database != "neo4j":
+        # Check if database exists (Enterprise feature)
+        try:
+            with driver.session(database="neo4j") as session:
+                result = session.run(
+                    "SHOW DATABASES WHERE name = $name",
+                    name=config.database,
+                )
+                db_info = result.single()
+
+                if db_info is None:
+                    # Database doesn't exist
+                    logger.warning(
+                        f"Database '{config.database}' not found. "
+                        f"Neo4j Community Edition supports only the default 'neo4j' database. "
+                        f"Switching to 'neo4j' database."
+                    )
+                else:
+                    logger.debug(f"Database '{config.database}' already exists")
+        except Exception as exc:
+            # SHOW DATABASES may fail on older versions or Community Edition
+            logger.warning(
+                f"Could not check database '{config.database}': {exc}. "
+                f"Using default 'neo4j' database."
+            )
+
+    # Reconnect to the target database (or default if not available)
+    driver.close()
+    try:
+        return GraphDatabase.driver(
+            config.uri,
+            auth=(config.user, config.password),
+            database=config.database,
+        )
+    except Exception as exc:
+        logger.warning(f"Could not connect to database '{config.database}': {exc}. Using 'neo4j'.")
+        return GraphDatabase.driver(
+            config.uri,
+            auth=(config.user, config.password),
+            database="neo4j",
+        )
 
 
 def apply_schema(driver: Driver, schema_path: Optional[Path] = None) -> None:
@@ -98,8 +174,8 @@ def get_current_version(driver: Driver) -> Optional[str]:
 # Cypher helpers for MERGE / UPDATE operations
 # ---------------------------------------------------------------------------
 
-# Generic labels that can carry an AST node
-_KIND_TO_LABEL: dict[str, str] = {
+# Generic labels that can carry an AST node (public API)
+KIND_TO_LABEL: dict[str, str] = {
     "Project":     "Project",
     "Package":     "Package",
     "Namespace":   "Namespace",

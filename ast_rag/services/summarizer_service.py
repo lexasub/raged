@@ -26,7 +26,7 @@ from typing import Any, Optional
 import httpx
 from pydantic import BaseModel, Field
 
-from ast_rag.ast_rag_api import ASTRagAPI
+from ast_rag.api.ast_rag_api import ASTRagAPI
 from ast_rag.models import ASTNode, NodeKind
 
 logger = logging.getLogger(__name__)

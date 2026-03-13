@@ -19,8 +19,8 @@ from typing import Any, Optional
 
 from neo4j import Driver
 
-from ast_rag.ast_rag_api import ASTRagAPI
-from ast_rag.embeddings import EmbeddingManager
+from ast_rag.api.ast_rag_api import ASTRagAPI
+from ast_rag.services.embedding_manager import EmbeddingManager
 from ast_rag.models import ASTNode, Language as ModelLanguage, NodeKind
 
 from .models import (

@@ -33,8 +33,8 @@ from ast_rag.models import (
     EdgeKind,
     Language as Lang,
 )
-from ast_rag.language_queries import LANGUAGE_QUERIES
-from ast_rag.parse_cache import ParseCache, SQLiteParseCache
+from ast_rag.services.parsing.language_queries import LANGUAGE_QUERIES
+from ast_rag.utils.parse_cache import ParseCache, SQLiteParseCache
 
 logger = logging.getLogger(__name__)
 
@@ -109,10 +109,12 @@ class ParserManager:
         self,
         cache: Optional[Union[ParseCache, SQLiteParseCache]] = None,
         config: Optional[dict] = None,
+        project_id: str = "default",
     ) -> None:
         self._languages: dict[str, Language] = {}
         self._parsers: dict[str, Parser] = {}
         self._compiled_queries: dict[str, dict[str, object]] = {}
+        self._project_id: str = project_id
         # Factory: caller-supplied cache > config-driven > default in-memory.
         if cache is not None:
             self._cache: Union[ParseCache, SQLiteParseCache] = cache
@@ -337,6 +339,7 @@ class ParserManager:
                     code_hash=code_hash,
                     signature=signature,
                     source_text=src_text,
+                    project_id=self._project_id,
                     valid_from=commit_hash,
                 )
                 nodes.append(ast_node)
@@ -653,7 +656,7 @@ class ParserManager:
             return [], []
 
         # Use BlockExtractor
-        from ast_rag.block_extractor import BlockExtractor
+        from ast_rag.services.parsing.block_extractor import BlockExtractor
         extractor = BlockExtractor()
         blocks = extractor.extract_blocks(tree, source, function_nodes, lang, commit_hash)
 

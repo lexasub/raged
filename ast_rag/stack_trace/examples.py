@@ -112,8 +112,8 @@ USAGE_EXAMPLE_PYTHON_API = """
 # ============================================================================
 
 from ast_rag.stack_trace import StackTraceService, StackTraceParserFactory
-from ast_rag.graph_schema import create_driver
-from ast_rag.embeddings import EmbeddingManager
+from ast_rag.repositories import create_driver
+from ast_rag.services.embedding_manager import EmbeddingManager
 from ast_rag.models import ProjectConfig
 
 # Load configuration

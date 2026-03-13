@@ -1,5 +1,5 @@
 """
-ast_rag_api.py - High-level query API for AST-RAG.
+api.py - High-level query API for AST-RAG.
 
 Combines Neo4j graph queries with Qdrant vector search.
 
@@ -27,7 +27,7 @@ from typing import Optional
 
 from neo4j import Driver
 
-from ast_rag.metrics import (
+from ast_rag.utils.metrics import (
     track_latency,
     SEARCH_LATENCY,
     FIND_DEFINITION_LATENCY,
@@ -43,9 +43,9 @@ from ast_rag.models import (
     EdgeKind,
     Language,
 )
-from ast_rag.embeddings import EmbeddingManager
-from ast_rag.graph_schema import _KIND_TO_LABEL
-from ast_rag.graph_updater import compute_diff_for_commits
+from ast_rag.services.embedding_manager import EmbeddingManager
+from ast_rag.repositories.neo4j_helpers import _KIND_TO_LABEL
+from ast_rag.services.graph_updater_service import compute_diff_for_commits
 
 logger = logging.getLogger(__name__)
 

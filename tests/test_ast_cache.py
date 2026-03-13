@@ -25,7 +25,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from ast_rag.parse_cache import LazyTree, ParseCache, SQLiteParseCache
-from ast_rag.ast_parser import ParserManager
+from ast_rag.services.parsing.parser_manager import ParserManager
 
 
 # ---------------------------------------------------------------------------

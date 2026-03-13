@@ -16,7 +16,7 @@ from rich.console import Console
 from rich.table import Table
 from rich.syntax import Syntax
 
-from ast_rag.models import ASTNode, SearchResult
+from ast_rag.dto import ASTNode, SearchResult
 
 
 console = Console()

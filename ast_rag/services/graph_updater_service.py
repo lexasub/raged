@@ -26,22 +26,22 @@ if TYPE_CHECKING:
 from neo4j import Driver, Session
 
 from ast_rag.models import ASTNode, ASTEdge, DiffResult, ASTBlock
-from ast_rag.graph_schema import (
+from ast_rag.repositories.neo4j_helpers import (
     batch_upsert_nodes,
     batch_expire_nodes,
     batch_upsert_edges,
     batch_expire_edges,
     ensure_current_version,
-    _KIND_TO_LABEL,
+    KIND_TO_LABEL as _KIND_TO_LABEL,
 )
-from ast_rag.ast_parser import ParserManager, walk_source_files
-from ast_rag.file_cache import (
+from ast_rag.services.parsing.parser_manager import ParserManager, walk_source_files
+from ast_rag.utils.file_cache import (
     init_file_cache,
     file_changed_since_last_index,
     update_file_cache,
     save_file_cache,
 )
-from ast_rag.metrics import (
+from ast_rag.utils.metrics import (
     track_latency,
     UPDATE_LATENCY,
     UPDATE_TOTAL,
@@ -279,6 +279,7 @@ def update_from_git(
     old_commit: str,
     new_commit: str,
     exclude_dirs: Optional[list[str]] = None,
+    project_id: str = "default",
 ) -> DiffResult:
     """Orchestrate an incremental update from git diff OLD..NEW.
 
@@ -334,7 +335,7 @@ def update_from_git(
             f"({100 - len(filtered_paths) / len(changed_paths) * 100:.1f}% skipped)"
         )
 
-        pm = ParserManager()
+        pm = ParserManager(project_id=project_id)
         agg_diff = DiffResult()
 
         for file_path in filtered_paths:
@@ -416,6 +417,7 @@ def compute_diff_for_commits(
     exclude_dirs: Optional[list[str]] = None,
     dry_run: bool = False,
     max_changed_nodes: int = 100000,
+    project_id: str = "default",
 ) -> DiffResult | dict:
     """Compute AST-level diff between two git commits without applying to database.
 
@@ -495,7 +497,7 @@ def compute_diff_for_commits(
             )
         return result
 
-    pm = ParserManager()
+    pm = ParserManager(project_id=project_id)
     agg_diff = DiffResult()
 
     for file_path in changed_paths:
@@ -606,6 +608,7 @@ def get_workspace_diff(
     driver: Driver,
     repo_path: str,
     exclude_dirs: Optional[list[str]] = None,
+    project_id: str = "default",
 ) -> DiffResult:
     """
     Compute diff between HEAD commit and current working tree.
@@ -626,7 +629,7 @@ def get_workspace_diff(
         head_hash = "INIT"
         head_commit = None
 
-    pm = ParserManager()
+    pm = ParserManager(project_id=project_id)
     agg_diff = DiffResult()
 
     # Get all changed files (staged + unstaged)
@@ -710,12 +713,13 @@ def apply_workspace_diff(
     driver: Driver,
     repo_path: str,
     exclude_dirs: Optional[list[str]] = None,
+    project_id: str = "default",
 ) -> DiffResult:
     """
     Compute and apply workspace diff to the graph.
     Uses WORKSPACE label instead of a commit hash.
     """
-    diff = get_workspace_diff(driver, repo_path, exclude_dirs)
+    diff = get_workspace_diff(driver, repo_path, exclude_dirs, project_id)
 
     if diff.is_empty:
         return diff
@@ -759,7 +763,7 @@ def extract_and_store_blocks(
     Returns:
         Tuple of (blocks, edges) where edges are CONTAINS_BLOCK relationships
     """
-    from ast_rag.block_extractor import BlockExtractor
+    from ast_rag.services.parsing.block_extractor import BlockExtractor
     from ast_rag.models import ASTBlock, ASTEdge, EdgeKind
 
     # Filter to only function/method nodes

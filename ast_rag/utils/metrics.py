@@ -2,7 +2,7 @@
 Prometheus metrics for AST-RAG monitoring.
 
 Usage:
-    from ast_rag.metrics import track_latency, SEARCH_LATENCY
+    from ast_rag.utils.metrics import track_latency, SEARCH_LATENCY
 
     @track_latency(SEARCH_LATENCY)
     def search_semantic(...):
@@ -47,6 +47,18 @@ UPDATE_LATENCY = Histogram(
     "ast_rag_update_latency_seconds",
     "Git update latency",
     buckets=[0.1, 0.5, 1.0, 2.5, 5.0, 10.0, 25.0, 50.0, 100.0],
+)
+
+INDEX_FILES_TOTAL = Counter(
+    "ast_rag_indexed_files_total",
+    "Total number of indexed files",
+    labelnames=["language"],
+)
+
+INDEX_ERRORS_TOTAL = Counter(
+    "ast_rag_index_errors_total",
+    "Total number of indexing errors",
+    labelnames=["file_type"],
 )
 
 SEARCH_TOTAL = Counter(

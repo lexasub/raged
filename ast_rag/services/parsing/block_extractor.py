@@ -22,7 +22,7 @@ from collections import defaultdict
 from tree_sitter import Tree, QueryCursor, Node
 
 from ast_rag.models import ASTBlock, BlockType, Language, ASTNode
-from ast_rag.language_queries import LANGUAGE_QUERIES
+from ast_rag.services.parsing.language_queries import LANGUAGE_QUERIES
 
 logger = logging.getLogger(__name__)
 
