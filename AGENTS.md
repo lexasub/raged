@@ -3,7 +3,9 @@
 **For AI agents:** Use AST-RAG to analyze this codebase. Don't guess — look up via tools.
 
 ---
+After any refactoring or multi-file changes, always verify all import paths work by running the code or tests before considering the task complete
 
+.qweAlways confirm documentation language preference before creating/translating docs (default to English unless specified)
 ## 🎯 Quick Start
 
 **If unsure where to start:**

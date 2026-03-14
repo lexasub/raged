@@ -558,12 +558,12 @@ RUST_QUERIES: dict[str, str] = {
 ) @node
 """,
     "for_blocks": """
-(for_expression
-  pattern: (_) @pattern
-  iterable: (_) @iterable
-  body: (block)? @body
-) @node
-""",
+    (for_expression
+      pattern: (_) @pattern
+      value: (_) @iterable
+      body: (block)? @body
+    ) @node
+    """,
     "while_blocks": """
 (while_expression
   condition: (_) @condition
@@ -571,22 +571,19 @@ RUST_QUERIES: dict[str, str] = {
 ) @node
 """,
     "loop_blocks": """
-(loop_expression
-  body: (block)? @body
-  (label: (loop_label))? @label
-) @node
-""",
+    (loop_expression
+      body: (block)? @body
+    ) @node
+    """,
     "match_blocks": """
-(match_expression
-  value: (_) @subject
-  body: (match_body
-    (match_arm
-      pattern: (_) @pattern
-      value: (_) @consequence
-    )*
-  )
-) @node
-""",
+    (match_expression
+      value: (_) @subject
+      (match_arm
+        pattern: (_) @pattern
+        value: (_) @consequence
+      )*
+    ) @node
+    """,
     "try_blocks": """
 (try_expression
   (block)? @body
@@ -647,12 +644,12 @@ PYTHON_QUERIES: dict[str, str] = {
 ) @node
 """,
     "for_blocks": """
-(for_statement
-  target: (_) @target
-  iterable: (_) @iterable
-  body: (block)? @body
-) @node
-""",
+    (for_statement
+      left: (_) @target
+      right: (_) @iterable
+      body: (block)? @body
+    ) @node
+    """,
     "while_blocks": """
 (while_statement
   condition: (_) @condition
@@ -660,21 +657,27 @@ PYTHON_QUERIES: dict[str, str] = {
 ) @node
 """,
     "try_blocks": """
-(try_statement
-  body: (block)? @body
-  handler: (except_clause
-    value: (_)? @exception_type
-    body: (block)? @handler_body
-  )*
-  finally_clause: (block)? @finally_body
-) @node
-""",
+    (try_statement
+      body: (block)? @body
+      (except_clause
+        value: (_)? @exception_type
+        body: (block)? @handler_body
+      )*
+      (finally_clause
+        (block)? @finally_body
+      )?
+    ) @node
+    """,
     "with_blocks": """
-(with_statement
-  (with_item)+ @with_items
-  body: (block)? @body
-) @node
-""",
+    (with_statement
+      (with_clause
+        (with_item
+          value: (_) @subject
+        )*
+      )?
+      body: (block)? @body
+    ) @node
+    """,
     "lambda_expr": """
 (lambda
   parameters: (lambda_parameters)? @params
@@ -682,16 +685,15 @@ PYTHON_QUERIES: dict[str, str] = {
 ) @node
 """,
     "match_blocks": """
-(match_statement
-  subject: (_) @subject
-  body: (block
-    (case_clause
-      pattern: (_) @pattern
-      consequence: (block)? @consequence
-    )*
-  )
-) @node
-""",
+    (match_statement
+      subject: (_) @subject
+      body: (block) @body
+      (case_clause
+        (case_pattern) @pattern
+        consequence: (block)? @consequence
+      )*
+    ) @node
+    """,
 }
 
 # ---------------------------------------------------------------------------
