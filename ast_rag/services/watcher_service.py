@@ -44,7 +44,7 @@ from watchdog.events import (
 )
 
 from ast_rag.models import ProjectConfig
-from ast_rag.repositories import create_driver
+from ast_rag.repositories.neo4j_helpers import create_driver
 from ast_rag.services.graph_updater_service import apply_workspace_diff
 from ast_rag.services.embedding_manager import EmbeddingManager
 from ast_rag.services.parsing.parser_manager import ParserManager
@@ -53,9 +53,32 @@ logger = logging.getLogger(__name__)
 
 # Supported source file extensions
 SOURCE_EXTENSIONS = {
-    ".py", ".java", ".cpp", ".cc", ".cxx", ".c", ".h", ".hpp", ".hxx",
-    ".rs", ".ts", ".tsx", ".js", ".jsx", ".go", ".cs", ".rb", ".php",
-    ".swift", ".kt", ".kts", ".scala", ".ex", ".exs", ".erl", ".hs",
+    ".py",
+    ".java",
+    ".cpp",
+    ".cc",
+    ".cxx",
+    ".c",
+    ".h",
+    ".hpp",
+    ".hxx",
+    ".rs",
+    ".ts",
+    ".tsx",
+    ".js",
+    ".jsx",
+    ".go",
+    ".cs",
+    ".rb",
+    ".php",
+    ".swift",
+    ".kt",
+    ".kts",
+    ".scala",
+    ".ex",
+    ".exs",
+    ".erl",
+    ".hs",
 }
 
 
@@ -155,7 +178,9 @@ class WorkspaceWatcher:
         self._path = os.path.abspath(path)
         self._config_path = config_path
         self._debounce_seconds = debounce_seconds
-        self._exclude_dirs = set(exclude_dirs or {"venv", ".venv", "node_modules", ".git", "__pycache__"})
+        self._exclude_dirs = set(
+            exclude_dirs or {"venv", ".venv", "node_modules", ".git", "__pycache__"}
+        )
 
         # Load config
         if config_path and Path(config_path).exists():
@@ -169,7 +194,9 @@ class WorkspaceWatcher:
 
         # Initialize components
         self._driver = create_driver(self._config.neo4j)
-        self._embed = EmbeddingManager(self._config.qdrant, self._config.embedding, neo4j_driver=self._driver)
+        self._embed = EmbeddingManager(
+            self._config.qdrant, self._config.embedding, neo4j_driver=self._driver
+        )
         self._parser = ParserManager(project_id=self._config.neo4j.project_id)
 
         # Watcher state

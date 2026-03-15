@@ -33,7 +33,12 @@ from rich.console import Console
 from ast_rag.models import ProjectConfig
 from ast_rag.services.parsing.parser_manager import ParserManager, walk_source_files
 from ast_rag.repositories import apply_schema, create_driver
-from ast_rag.services.graph_updater_service import full_index, update_from_git, get_workspace_diff, apply_workspace_diff
+from ast_rag.services.graph_updater_service import (
+    full_index,
+    update_from_git,
+    get_workspace_diff,
+    apply_workspace_diff,
+)
 from ast_rag.services.embedding_manager import EmbeddingManager
 from ast_rag.services.api import ASTRagAPI
 from ast_rag.utils.output import get_formatter
@@ -132,13 +137,13 @@ def init(
                 source = fh.read()
             nodes = pm.extract_nodes(tree, fp, lang, source, commit)
             edges = pm.extract_edges(tree, nodes, fp, lang, source, commit)
-            
+
             # Extract blocks for Python and Rust files
             if lang in ("python", "rust"):
                 blocks, block_edges = pm.extract_blocks(tree, nodes, fp, lang, source, commit)
                 all_blocks.extend(blocks)
                 all_block_edges.extend(block_edges)
-            
+
             all_nodes.extend(nodes)
             all_edges.extend(edges)
 
@@ -153,12 +158,18 @@ def init(
 
         # Store blocks and CONTAINS_BLOCK edges
         if all_blocks:
-            from ast_rag.services.graph_updater_service import batch_upsert_blocks, batch_upsert_block_edges
+            from ast_rag.services.graph_updater_service import (
+                batch_upsert_blocks,
+                batch_upsert_block_edges,
+            )
+
             with driver.session() as session:
                 batch_upsert_blocks(session, all_blocks, commit_hash)
                 batch_upsert_block_edges(session, all_block_edges)
-            console.print(f"[green]Stored {len(all_blocks)} blocks and {len(all_block_edges)} CONTAINS_BLOCK edges.[/green]")
-    
+            console.print(
+                f"[green]Stored {len(all_blocks)} blocks and {len(all_block_edges)} CONTAINS_BLOCK edges.[/green]"
+            )
+
     console.print("[green]Graph database updated.[/green]")
 
     # 4. Build embeddings
@@ -227,7 +238,9 @@ def create_database(
                 console.print(f"[green]Database '{database_name}' created successfully.[/green]")
             else:
                 current_status = db_info.get("currentStatus", "unknown")
-                console.print(f"[green]Database '{database_name}' already exists (status: {current_status}).[/green]")
+                console.print(
+                    f"[green]Database '{database_name}' already exists (status: {current_status}).[/green]"
+                )
     except ClientError as exc:
         console.print(f"[red]Neo4j error: {exc.code} - {exc.message}[/red]")
         raise typer.Exit(1)
@@ -294,12 +307,16 @@ def query(
     lang: Optional[str] = typer.Option(None, "--lang", "-l"),
     kind: Optional[str] = typer.Option(None, "--kind", "-k"),
     vector_weight: Optional[float] = typer.Option(
-        None, "--vector-weight", "-vw",
-        help="Weight for vector similarity (0.0-1.0). Overrides config if specified."
+        None,
+        "--vector-weight",
+        "-vw",
+        help="Weight for vector similarity (0.0-1.0). Overrides config if specified.",
     ),
     keyword_weight: Optional[float] = typer.Option(
-        None, "--keyword-weight", "-kw",
-        help="Weight for keyword search (0.0-1.0). Overrides config if specified."
+        None,
+        "--keyword-weight",
+        "-kw",
+        help="Weight for keyword search (0.0-1.0). Overrides config if specified.",
     ),
     config: Optional[str] = typer.Option(None, "--config", "-c"),
     humanize: bool = humanize_option,
@@ -408,37 +425,36 @@ def refs(
     driver = create_driver(cfg.neo4j)
     embed = EmbeddingManager(cfg.qdrant, cfg.embedding, neo4j_driver=driver)
     api = ASTRagAPI(driver, embed)
-    
+
     with console.status(f"Finding references to '{name}'..."):
         results = api.find_references(name, kind=kind, lang=lang, limit=limit)
-    
+
     if not results["references"]:
         console.print("[yellow]No references found[/yellow]")
         return
-    
+
     if format == "json":
         print(json.dumps(results, indent=2))
     else:
         console.print(f"\n[bold]References to '{name}':[/bold] {results['total']} total\n")
-        
+
         # Group by file
         by_file = {}
         for ref in results["references"]:
             fp = ref["node"]["file_path"]
             by_file.setdefault(fp, []).append(ref)
-        
+
         for file_path, refs_in_file in by_file.items():
             console.print(f"[cyan]{file_path}[/cyan]")
             for ref in refs_in_file[:10]:  # Show first 10 per file
                 node = ref["node"]
                 console.print(
-                    f"  {node['start_line']:4d}: {ref['reference_type']:10s} "
-                    f"{node['name']}"
+                    f"  {node['start_line']:4d}: {ref['reference_type']:10s} {node['name']}"
                 )
             if len(refs_in_file) > 10:
                 console.print(f"  ... and {len(refs_in_file) - 10} more")
             console.print()
-    
+
     driver.close()
 
 
@@ -450,8 +466,9 @@ def refs(
 @app.command("call-graph")
 def call_graph(
     name: str = typer.Argument(..., help="Function/method name"),
-    direction: str = typer.Option("both", "--direction", "-d",
-                                  help="Direction: callers, callees, or both"),
+    direction: str = typer.Option(
+        "both", "--direction", "-d", help="Direction: callers, callees, or both"
+    ),
     depth: int = typer.Option(2, "--depth", help="Graph depth"),
     lang: Optional[str] = typer.Option(None, "--lang", "-l", help="Language filter"),
     config: Optional[str] = typer.Option(None, "--config", "-c"),
@@ -588,10 +605,10 @@ def workspace(
 ) -> None:
     """
     Show uncommitted changes in the working tree (git diff HEAD).
-    
+
     This command compares the current working directory against HEAD commit
     and shows what would change in the graph if applied.
-    
+
     Use --apply to update the graph with uncommitted changes.
     """
     if verbose:
@@ -635,7 +652,7 @@ def workspace(
                 diff.updated_nodes,
                 diff.deleted_node_ids,
             )
-        
+
         console.print("[green]Workspace changes applied to graph and embeddings.[/green]")
     else:
         console.print("\n[yellow]Hint: Use --apply to apply these changes to the graph.[/yellow]")
@@ -788,7 +805,9 @@ def evaluate(
             expected_set = {(e["file"], e["line"], e.get("name", "")) for e in expected}
             returned_set = {(r.file_path, r.start_line, r.name) for r in returned}
         elif tool_name == "find_definition":
-            expected_set = {(e["file"], e["line"]) for e in ground_truth["ground_truth"]["definitions"]}
+            expected_set = {
+                (e["file"], e["line"]) for e in ground_truth["ground_truth"]["definitions"]
+            }
             returned_set = {(r.file_path, r.start_line) for r in returned}
         elif tool_name == "find_callers":
             expected_set = {(e["file"], e["line"]) for e in ground_truth["ground_truth"]["callers"]}
@@ -852,7 +871,9 @@ def evaluate(
         console.print(f"\n[bold]Evaluating:[/bold] {query}")
         result = evaluate_query(query)
         status = "[green]✅ PASS[/green]" if result["overall_pass"] else "[red]❌ FAIL[/red]"
-        console.print(f"{status} F1={result['metrics']['f1_score']:.2f} P={result['metrics']['precision']:.2f} R={result['metrics']['recall']:.2f}")
+        console.print(
+            f"{status} F1={result['metrics']['f1_score']:.2f} P={result['metrics']['precision']:.2f} R={result['metrics']['recall']:.2f}"
+        )
         console.print(json.dumps(result, indent=2))
     else:
         # All queries
@@ -897,17 +918,21 @@ def evaluate(
         output_path = Path(output) if output else Path("benchmarks/results/evaluation.json")
         output_path.parent.mkdir(parents=True, exist_ok=True)
         with open(output_path, "w") as f:
-            json.dump({
-                "total_benchmarks": total,
-                "passed": passed,
-                "pass_rate": passed / total if total > 0 else 0,
-                "average_metrics": {
-                    "f1_score": avg_f1,
-                    "precision": avg_precision,
-                    "recall": avg_recall,
+            json.dump(
+                {
+                    "total_benchmarks": total,
+                    "passed": passed,
+                    "pass_rate": passed / total if total > 0 else 0,
+                    "average_metrics": {
+                        "f1_score": avg_f1,
+                        "precision": avg_precision,
+                        "recall": avg_recall,
+                    },
+                    "results": results,
                 },
-                "results": results,
-            }, f, indent=2)
+                f,
+                indent=2,
+            )
         console.print(f"\n[green]💾 Results saved to:[/green] {output_path}")
 
     driver.close()
@@ -955,8 +980,7 @@ def signature_search(
 
     for r in results:
         console.print(
-            f"[cyan]{r.file_path}[/cyan]:[yellow]{r.start_line}[/yellow]  "
-            f"[bold]{r.name}[/bold]"
+            f"[cyan]{r.file_path}[/cyan]:[yellow]{r.start_line}[/yellow]  [bold]{r.name}[/bold]"
         )
 
     console.rule("[bold green]Done[/bold green]")
@@ -965,6 +989,33 @@ def signature_search(
 # ---------------------------------------------------------------------------
 # index-folder command
 # ---------------------------------------------------------------------------
+
+
+def _parse_file_for_multiprocessing(args):
+    """Parse file for multiprocessing - must be at module level for pickle."""
+    import sys
+    import os
+
+    # Add project root to path for subprocess
+    project_root = os.environ.get("AST_RAG_PROJECT_ROOT", "/home/su/src/local/raged")
+    if project_root not in sys.path:
+        sys.path.insert(0, project_root)
+
+    file_path, lang, source = args
+    commit = os.environ.get("AST_RAG_COMMIT", "INIT")
+    project_id = os.environ.get("AST_RAG_PROJECT_ID", "default")
+    try:
+        from ast_rag.services.parsing.parser_manager import ParserManager
+
+        pm = ParserManager(project_id=project_id)
+        tree = pm.parse_file(file_path, source=source)
+        if tree is None:
+            return (file_path, [], [])
+        nodes = pm.extract_nodes(tree, file_path, lang, source, commit)
+        edges = pm.extract_edges(tree, nodes, file_path, lang, source, commit)
+        return (file_path, nodes, edges)
+    except Exception as e:
+        return (file_path, [], str(e))
 
 
 @app.command()
@@ -993,12 +1044,20 @@ def index_folder(
         logging.basicConfig(level=logging.WARNING)
 
     import time
+    import os
     from concurrent.futures import ProcessPoolExecutor, as_completed
     from pathlib import Path
 
+    # Set project root for subprocess
+    os.environ["AST_RAG_PROJECT_ROOT"] = str(Path(__file__).parent.parent.parent)
+
     from ast_rag.services.parsing.parser_manager import ParserManager, EXT_TO_LANG
     from ast_rag.repositories import create_driver, apply_schema
-    from ast_rag.services.graph_updater_service import _nodes_to_batch_by_label, batch_upsert_nodes, batch_upsert_edges
+    from ast_rag.services.graph_updater_service import (
+        _nodes_to_batch_by_label,
+        batch_upsert_nodes,
+        batch_upsert_edges,
+    )
 
     cfg = _load_config(config)
     folder_path = Path(path).resolve()
@@ -1012,6 +1071,7 @@ def index_folder(
 
     # Set project ID for worker processes
     import os
+
     os.environ["AST_RAG_PROJECT_ID"] = cfg.neo4j.project_id
 
     # Connect to Neo4j
@@ -1029,9 +1089,21 @@ def index_folder(
     for dirpath, dirnames, filenames in os.walk(folder_path):
         # Skip hidden and build directories
         dirnames[:] = [
-            d for d in dirnames if d not in [
-                ".git", ".venv", "venv", "__pycache__", "node_modules",
-                "target", "build", "dist", ".idea", ".vscode", ".pytest_cache"
+            d
+            for d in dirnames
+            if d
+            not in [
+                ".git",
+                ".venv",
+                "venv",
+                "__pycache__",
+                "node_modules",
+                "target",
+                "build",
+                "dist",
+                ".idea",
+                ".vscode",
+                ".pytest_cache",
             ]
         ]
         for fname in filenames:
@@ -1048,22 +1120,6 @@ def index_folder(
         driver.close()
         return
 
-    # Parser function for multiprocessing
-    def parse_file(args):
-        file_path, lang, source = args
-        commit = os.environ.get("AST_RAG_COMMIT", "INIT")
-        project_id = os.environ.get("AST_RAG_PROJECT_ID", "default")
-        try:
-            pm = ParserManager(project_id=project_id)
-            tree = pm.parse_file(file_path, source=source)
-            if tree is None:
-                return (file_path, [], [])
-            nodes = pm.extract_nodes(tree, file_path, lang, source, commit)
-            edges = pm.extract_edges(tree, nodes, file_path, lang, source, commit)
-            return (file_path, nodes, edges)
-        except Exception as e:
-            return (file_path, [], str(e))
-
     # Index in batches
     total_nodes = 0
     total_edges = 0
@@ -1071,7 +1127,7 @@ def index_folder(
     start_time = time.time()
 
     for i in range(0, len(all_files), batch_size):
-        batch = all_files[i:i+batch_size]
+        batch = all_files[i : i + batch_size]
         batch_start = time.time()
 
         # Read files
@@ -1087,7 +1143,9 @@ def index_folder(
         # Parse in parallel
         parsed = []
         with ProcessPoolExecutor(max_workers=workers) as executor:
-            futures = [executor.submit(parse_file, args) for args in files_with_source]
+            futures = [
+                executor.submit(_parse_file_for_multiprocessing, args) for args in files_with_source
+            ]
             for future in as_completed(futures):
                 parsed.append(future.result())
 
@@ -1127,15 +1185,15 @@ def index_folder(
             f"[cyan][{files_done:>6}/{len(all_files)}][/cyan] "
             f"+{len(batch_nodes):>4} nodes, +{len(batch_edges):>4} edges | "
             f"{files_per_sec:>5.1f} files/s | "
-            f"Batch: {time.time()-batch_start:.2f}s"
+            f"Batch: {time.time() - batch_start:.2f}s"
         )
 
     total_time = time.time() - start_time
 
     console.rule("[bold green]FOLDER COMPLETE[/bold green]")
-    console.print(f"[bold]Time:[/bold]      {total_time/60:.1f} minutes")
+    console.print(f"[bold]Time:[/bold]      {total_time / 60:.1f} minutes")
     console.print(f"[bold]Files:[/bold]     {files_done}")
-    console.print(f"[bold]Speed:[/bold]     {files_done/total_time:.1f} files/s")
+    console.print(f"[bold]Speed:[/bold]     {files_done / total_time:.1f} files/s")
     console.print(f"[bold]Nodes:[/bold]     {total_nodes:,}")
     console.print(f"[bold]Edges:[/bold]     {total_edges:,}")
     console.print(f"[bold]Errors:[/bold]    {errors}")
@@ -1152,8 +1210,7 @@ def index_folder(
 def blocks(
     function: str = typer.Argument(..., help="Function name or ID to get blocks for"),
     block_type: Optional[str] = typer.Option(
-        None, "--type", "-t",
-        help="Filter by block type: if/for/while/try/lambda/with/match/loop"
+        None, "--type", "-t", help="Filter by block type: if/for/while/try/lambda/with/match/loop"
     ),
     lang: Optional[str] = typer.Option(None, "--lang", "-l", help="Language filter"),
     source: bool = typer.Option(False, "--source", "-s", help="Show source code for blocks"),
@@ -1187,10 +1244,12 @@ def blocks(
     if stats:
         # Show global statistics
         stats_data = api.get_block_statistics()
-        
+
         if humanize:
             console.print("\n[bold]Block Statistics[/bold]\n")
-            console.print(f"  Total blocks:      [green]{stats_data.get('total_blocks', 0)}[/green]")
+            console.print(
+                f"  Total blocks:      [green]{stats_data.get('total_blocks', 0)}[/green]"
+            )
             console.print(f"  If blocks:         {stats_data.get('if_count', 0)}")
             console.print(f"  For blocks:        {stats_data.get('for_count', 0)}")
             console.print(f"  While blocks:      {stats_data.get('while_count', 0)}")
@@ -1227,15 +1286,19 @@ def blocks(
     if humanize:
         for i, block in enumerate(blocks, 1):
             block_type_display = block.get("block_type", "unknown").upper()
-            console.print(f"[cyan]{i}. {block_type_display}[/cyan] block at line {block.get('start_line')}-{block.get('end_line')}")
+            console.print(
+                f"[cyan]{i}. {block_type_display}[/cyan] block at line {block.get('start_line')}-{block.get('end_line')}"
+            )
             console.print(f"   Nesting depth: {block.get('nesting_depth')}")
-            
+
             if block.get("captured_variables"):
-                console.print(f"   Captured vars: [yellow]{', '.join(block['captured_variables'])}[/yellow]")
-            
+                console.print(
+                    f"   Captured vars: [yellow]{', '.join(block['captured_variables'])}[/yellow]"
+                )
+
             if block.get("name"):
                 console.print(f"   Name: {block['name']}")
-            
+
             if source:
                 source_code = api.get_block_source(block["id"])
                 if source_code:
@@ -1257,7 +1320,9 @@ def blocks(
 @app.command("lambdas")
 def list_lambdas(
     lang: Optional[str] = typer.Option(None, "--lang", "-l", help="Language filter"),
-    captured: bool = typer.Option(False, "--captured", "-c", help="Only show lambdas with captured variables"),
+    captured: bool = typer.Option(
+        False, "--captured", "-c", help="Only show lambdas with captured variables"
+    ),
     source: bool = typer.Option(False, "--source", "-s", help="Show source code"),
     config: Optional[str] = typer.Option(None, "--config", "-c"),
     humanize: bool = humanize_option,
@@ -1297,13 +1362,17 @@ def list_lambdas(
 
     if humanize:
         for i, lam in enumerate(lambdas, 1):
-            console.print(f"[cyan]{i}.[/cyan] {lam.get('name', 'lambda')} at line {lam.get('start_line')}")
+            console.print(
+                f"[cyan]{i}.[/cyan] {lam.get('name', 'lambda')} at line {lam.get('start_line')}"
+            )
             console.print(f"   File: {lam.get('file_path')}")
             console.print(f"   Parent: {lam.get('parent_function_id', 'unknown')[:24]}...")
-            
+
             if lam.get("captured_variables"):
-                console.print(f"   Captured: [yellow]{', '.join(lam['captured_variables'])}[/yellow]")
-            
+                console.print(
+                    f"   Captured: [yellow]{', '.join(lam['captured_variables'])}[/yellow]"
+                )
+
             if source:
                 source_code = api.get_block_source(lam["id"])
                 if source_code:
@@ -1325,23 +1394,32 @@ def analyze_stacktrace(
         help="Path to file containing stack trace. If not provided, reads from stdin.",
     ),
     config: Optional[str] = typer.Option(
-        None, "--config", "-c",
+        None,
+        "--config",
+        "-c",
         help="Path to config JSON file",
     ),
     output: str = typer.Option(
-        "markdown", "--output", "-o",
+        "markdown",
+        "--output",
+        "-o",
         help="Output format: markdown, json, text",
     ),
     verbose: bool = typer.Option(
-        False, "--verbose", "-v",
+        False,
+        "--verbose",
+        "-v",
         help="Enable verbose logging",
     ),
     no_ast_mapping: bool = typer.Option(
-        False, "--no-ast-mapping",
+        False,
+        "--no-ast-mapping",
         help="Skip AST node mapping (faster, less context)",
     ),
     limit_similar: int = typer.Option(
-        5, "--limit-similar", "-n",
+        5,
+        "--limit-similar",
+        "-n",
         help="Maximum number of similar issues to find",
     ),
 ) -> None:
@@ -1410,6 +1488,7 @@ def analyze_stacktrace(
         # Read from stdin
         console.print("[yellow]Reading stack trace from stdin (paste then Ctrl+D)...[/yellow]")
         import sys
+
         stacktrace = sys.stdin.read()
 
     if not stacktrace.strip():
@@ -1459,7 +1538,9 @@ def analyze_stacktrace(
 
         # Show stats
         console.print()
-        console.print(f"[dim]Parsed {report.total_frames} frames, mapped {report.mapped_frames} to AST[/dim]")
+        console.print(
+            f"[dim]Parsed {report.total_frames} frames, mapped {report.mapped_frames} to AST[/dim]"
+        )
         if report.similar_issues:
             console.print(f"[dim]Found {len(report.similar_issues)} similar issues[/dim]")
 
@@ -1469,9 +1550,9 @@ def analyze_stacktrace(
         console.print(f"[red]Error analyzing stack trace: {e}[/red]")
         if verbose:
             import traceback
+
             console.print(traceback.format_exc())
         raise typer.Exit(1)
-
 
 
 # ---------------------------------------------------------------------------
@@ -1481,19 +1562,33 @@ def analyze_stacktrace(
 
 @app.command("summarize")
 def summarize(
-    qualified_name: str = typer.Argument(..., help="Qualified name of the function/class to summarize"),
+    qualified_name: str = typer.Argument(
+        ..., help="Qualified name of the function/class to summarize"
+    ),
     lang: Optional[str] = typer.Option(None, "--lang", "-l", help="Language filter"),
-    kind: Optional[str] = typer.Option(None, "--kind", "-k", help="Node kind filter (Function, Method, Class, etc.)"),
-    max_callers: int = typer.Option(5, "--max-callers", help="Maximum number of callers to include in context"),
-    max_callees: int = typer.Option(5, "--max-callees", help="Maximum number of callees to include in context"),
+    kind: Optional[str] = typer.Option(
+        None, "--kind", "-k", help="Node kind filter (Function, Method, Class, etc.)"
+    ),
+    max_callers: int = typer.Option(
+        5, "--max-callers", help="Maximum number of callers to include in context"
+    ),
+    max_callees: int = typer.Option(
+        5, "--max-callees", help="Maximum number of callees to include in context"
+    ),
     force: bool = typer.Option(False, "--force", "-f", help="Force regeneration, ignore cache"),
-    output: str = typer.Option("markdown", "--output", "-o", help="Output format: markdown, json, text"),
+    output: str = typer.Option(
+        "markdown", "--output", "-o", help="Output format: markdown, json, text"
+    ),
     config: Optional[str] = typer.Option(None, "--config", "-c", help="Path to config JSON"),
     verbose: bool = typer.Option(False, "--verbose", "-v"),
     # LLM options
-    llm_base_url: str = typer.Option("http://localhost:11434/v1", "--llm-url", help="Base URL of OpenAI-compatible LLM API"),
+    llm_base_url: str = typer.Option(
+        "http://localhost:11434/v1", "--llm-url", help="Base URL of OpenAI-compatible LLM API"
+    ),
     llm_model: str = typer.Option("qwen2.5-coder:14b", "--llm-model", help="LLM model name"),
-    llm_api_key: Optional[str] = typer.Option(None, "--llm-api-key", help="API key for LLM (not needed for Ollama)"),
+    llm_api_key: Optional[str] = typer.Option(
+        None, "--llm-api-key", help="API key for LLM (not needed for Ollama)"
+    ),
 ) -> None:
     """
     Generate an LLM-based summary for a function, method, or class.
@@ -1562,7 +1657,16 @@ def summarize(
     node = defs[0]
 
     # Check if node kind is summarizable
-    summarizable_kinds = {"Function", "Method", "Constructor", "Destructor", "Class", "Interface", "Struct", "Trait"}
+    summarizable_kinds = {
+        "Function",
+        "Method",
+        "Constructor",
+        "Destructor",
+        "Class",
+        "Interface",
+        "Struct",
+        "Trait",
+    }
     if node.kind.value not in summarizable_kinds:
         console.print(f"[yellow]Warning: {node.kind.value} may not have detailed summary[/yellow]")
 
@@ -1634,23 +1738,32 @@ def analyze_stacktrace(
         help="Path to file containing stack trace. If not provided, reads from stdin.",
     ),
     config: Optional[str] = typer.Option(
-        None, "--config", "-c",
+        None,
+        "--config",
+        "-c",
         help="Path to config JSON file",
     ),
     output: str = typer.Option(
-        "markdown", "--output", "-o",
+        "markdown",
+        "--output",
+        "-o",
         help="Output format: markdown, json, text",
     ),
     verbose: bool = typer.Option(
-        False, "--verbose", "-v",
+        False,
+        "--verbose",
+        "-v",
         help="Enable verbose logging",
     ),
     no_ast_mapping: bool = typer.Option(
-        False, "--no-ast-mapping",
+        False,
+        "--no-ast-mapping",
         help="Skip AST node mapping (faster, less context)",
     ),
     limit_similar: int = typer.Option(
-        5, "--limit-similar", "-n",
+        5,
+        "--limit-similar",
+        "-n",
         help="Maximum number of similar issues to find",
     ),
 ) -> None:
@@ -1719,6 +1832,7 @@ def analyze_stacktrace(
         # Read from stdin
         console.print("[yellow]Reading stack trace from stdin (paste then Ctrl+D)...[/yellow]")
         import sys
+
         stacktrace = sys.stdin.read()
 
     if not stacktrace.strip():
@@ -1768,7 +1882,9 @@ def analyze_stacktrace(
 
         # Show stats
         console.print()
-        console.print(f"[dim]Parsed {report.total_frames} frames, mapped {report.mapped_frames} to AST[/dim]")
+        console.print(
+            f"[dim]Parsed {report.total_frames} frames, mapped {report.mapped_frames} to AST[/dim]"
+        )
         if report.similar_issues:
             console.print(f"[dim]Found {len(report.similar_issues)} similar issues[/dim]")
 
@@ -1778,6 +1894,7 @@ def analyze_stacktrace(
         console.print(f"[red]Error analyzing stack trace: {e}[/red]")
         if verbose:
             import traceback
+
             console.print(traceback.format_exc())
         raise typer.Exit(1)
 

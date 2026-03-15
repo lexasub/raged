@@ -26,13 +26,13 @@ if TYPE_CHECKING:
 from neo4j import Driver, Session
 
 from ast_rag.models import ASTNode, ASTEdge, DiffResult, ASTBlock
-from ast_rag.repositories.neo4j_helpers import (
+from ast_rag.repositories.neo4j_helpers import KIND_TO_LABEL
+from ast_rag.repositories.queries import (
     batch_upsert_nodes,
     batch_expire_nodes,
     batch_upsert_edges,
     batch_expire_edges,
     ensure_current_version,
-    KIND_TO_LABEL as _KIND_TO_LABEL,
 )
 from ast_rag.services.parsing.parser_manager import ParserManager, walk_source_files
 from ast_rag.utils.file_cache import (
@@ -321,7 +321,9 @@ def update_from_git(
                 logger.debug("Skipping unchanged file: %s", file_path)
 
         if not filtered_paths:
-            logger.info("All %d changed files are unchanged in cache - skipping", len(changed_paths))
+            logger.info(
+                "All %d changed files are unchanged in cache - skipping", len(changed_paths)
+            )
             UPDATE_TOTAL.labels(status="success").inc()
             return DiffResult()
 
@@ -358,7 +360,9 @@ def update_from_git(
             if new_tree is None:
                 continue
             new_nodes = pm.extract_nodes(new_tree, file_path, lang, new_source, new_commit)
-            new_edges = pm.extract_edges(new_tree, new_nodes, file_path, lang, new_source, new_commit)
+            new_edges = pm.extract_edges(
+                new_tree, new_nodes, file_path, lang, new_source, new_commit
+            )
 
             # Load old version from git at old_commit
             rel_path = os.path.relpath(file_path, repo_path)
@@ -768,8 +772,10 @@ def extract_and_store_blocks(
 
     # Filter to only function/method nodes
     from ast_rag.models import NodeKind
+
     function_nodes = [
-        n for n in nodes
+        n
+        for n in nodes
         if n.kind in (NodeKind.FUNCTION, NodeKind.METHOD, NodeKind.CONSTRUCTOR, NodeKind.DESTRUCTOR)
     ]
 
@@ -793,7 +799,9 @@ def extract_and_store_blocks(
 
     logger.debug(
         "Extracted %d blocks and %d CONTAINS_BLOCK edges from %s",
-        len(blocks), len(edges), file_path
+        len(blocks),
+        len(edges),
+        file_path,
     )
 
     return blocks, edges

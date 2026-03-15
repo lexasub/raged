@@ -44,7 +44,7 @@ from ast_rag.models import (
     Language,
 )
 from ast_rag.services.embedding_manager import EmbeddingManager
-from ast_rag.repositories.neo4j_helpers import _KIND_TO_LABEL
+from ast_rag.repositories.neo4j_helpers import KIND_TO_LABEL
 from ast_rag.services.graph_updater_service import compute_diff_for_commits
 
 logger = logging.getLogger(__name__)
@@ -123,7 +123,7 @@ class ASTRagAPI:
         Falls back to full-text index if no exact match found.
         """
         SEARCH_TOTAL.labels(lang=lang or "any", kind=kind or "any").inc()
-        label_filter = _KIND_TO_LABEL.get(kind, "") if kind else ""
+        label_filter = KIND_TO_LABEL.get(kind, "") if kind else ""
         label_clause = f":{label_filter}" if label_filter else ""
 
         lang_clause = "AND n.lang = $lang" if lang else ""
@@ -1080,21 +1080,23 @@ LIMIT $limit
         with self._driver.session() as session:
             for record in session.run(cypher, **params):
                 block_data = dict(record["b"])
-                results.append({
-                    "id": block_data.get("id", ""),
-                    "block_type": block_data.get("block_type", ""),
-                    "name": block_data.get("name", ""),
-                    "parent_function_id": block_data.get("parent_function_id", ""),
-                    "lang": block_data.get("lang", ""),
-                    "file_path": block_data.get("file_path", ""),
-                    "start_line": block_data.get("start_line", 0),
-                    "end_line": block_data.get("end_line", 0),
-                    "start_byte": block_data.get("start_byte", 0),
-                    "end_byte": block_data.get("end_byte", 0),
-                    "nesting_depth": block_data.get("nesting_depth", 1),
-                    "captured_variables": block_data.get("captured_variables", []),
-                    "edge_label": record.get("edge_label", ""),
-                })
+                results.append(
+                    {
+                        "id": block_data.get("id", ""),
+                        "block_type": block_data.get("block_type", ""),
+                        "name": block_data.get("name", ""),
+                        "parent_function_id": block_data.get("parent_function_id", ""),
+                        "lang": block_data.get("lang", ""),
+                        "file_path": block_data.get("file_path", ""),
+                        "start_line": block_data.get("start_line", 0),
+                        "end_line": block_data.get("end_line", 0),
+                        "start_byte": block_data.get("start_byte", 0),
+                        "end_byte": block_data.get("end_byte", 0),
+                        "nesting_depth": block_data.get("nesting_depth", 1),
+                        "captured_variables": block_data.get("captured_variables", []),
+                        "edge_label": record.get("edge_label", ""),
+                    }
+                )
 
         return results
 
@@ -1168,18 +1170,20 @@ LIMIT $limit
         with self._driver.session() as session:
             for record in session.run(cypher, **params):
                 block_data = dict(record["b"])
-                results.append({
-                    "id": block_data.get("id", ""),
-                    "block_type": block_data.get("block_type", ""),
-                    "name": block_data.get("name", ""),
-                    "parent_function_id": block_data.get("parent_function_id", ""),
-                    "lang": block_data.get("lang", ""),
-                    "file_path": block_data.get("file_path", ""),
-                    "start_line": block_data.get("start_line", 0),
-                    "end_line": block_data.get("end_line", 0),
-                    "nesting_depth": block_data.get("nesting_depth", 1),
-                    "captured_variables": block_data.get("captured_variables", []),
-                })
+                results.append(
+                    {
+                        "id": block_data.get("id", ""),
+                        "block_type": block_data.get("block_type", ""),
+                        "name": block_data.get("name", ""),
+                        "parent_function_id": block_data.get("parent_function_id", ""),
+                        "lang": block_data.get("lang", ""),
+                        "file_path": block_data.get("file_path", ""),
+                        "start_line": block_data.get("start_line", 0),
+                        "end_line": block_data.get("end_line", 0),
+                        "nesting_depth": block_data.get("nesting_depth", 1),
+                        "captured_variables": block_data.get("captured_variables", []),
+                    }
+                )
 
         return results
 
@@ -1220,18 +1224,20 @@ LIMIT $limit
         with self._driver.session() as session:
             for record in session.run(cypher, **params):
                 block_data = dict(record["b"])
-                results.append({
-                    "id": block_data.get("id", ""),
-                    "block_type": block_data.get("block_type", ""),
-                    "name": block_data.get("name", ""),
-                    "parent_function_id": block_data.get("parent_function_id", ""),
-                    "lang": block_data.get("lang", ""),
-                    "file_path": block_data.get("file_path", ""),
-                    "start_line": block_data.get("start_line", 0),
-                    "end_line": block_data.get("end_line", 0),
-                    "nesting_depth": block_data.get("nesting_depth", 1),
-                    "captured_variables": block_data.get("captured_variables", []),
-                })
+                results.append(
+                    {
+                        "id": block_data.get("id", ""),
+                        "block_type": block_data.get("block_type", ""),
+                        "name": block_data.get("name", ""),
+                        "parent_function_id": block_data.get("parent_function_id", ""),
+                        "lang": block_data.get("lang", ""),
+                        "file_path": block_data.get("file_path", ""),
+                        "start_line": block_data.get("start_line", 0),
+                        "end_line": block_data.get("end_line", 0),
+                        "nesting_depth": block_data.get("nesting_depth", 1),
+                        "captured_variables": block_data.get("captured_variables", []),
+                    }
+                )
 
         return results
 

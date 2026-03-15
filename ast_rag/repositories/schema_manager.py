@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Optional, List
 
 from neo4j import Driver, Session, Result
 
@@ -35,15 +35,15 @@ class SchemaManager:
 
         config = Neo4jConfig(uri="bolt://localhost:7687")
         driver = GraphDatabase.driver(config.uri, auth=(config.user, config.password))
-        
+
         schema_mgr = SchemaManager(driver)
-        
+
         # Apply schema from file
         schema_mgr.apply_schema_file("schema/graph_schema.cql")
-        
+
         # Create indexes
         schema_mgr.create_index("Function", "name")
-        
+
         # Validate schema
         is_valid = schema_mgr.validate_schema()
 
@@ -118,11 +118,19 @@ class SchemaManager:
             result = schema_mgr.apply_schema_file()
             print(f"Applied {result['statements_executed']} statements")
         """
-        raise NotImplementedError("Subclasses must implement apply_schema_file")
+        path = schema_path or self.DEFAULT_SCHEMA_PATH
+        if not path.exists():
+            raise FileNotFoundError(f"Schema file not found: {path}")
+
+        raw = path.read_text(encoding="utf-8")
+        # Split on semicolons (crude but works for our simple schema)
+        statements = [s.strip() for s in raw.split(";") if s.strip()]
+
+        return self.apply_schema_statements(statements, skip_failed=skip_failed)
 
     def apply_schema_statements(
         self,
-        statements: list[str],
+        statements: List[str],
         skip_failed: bool = True,
     ) -> dict[str, Any]:
         """Apply a list of Cypher statements.
@@ -134,7 +142,40 @@ class SchemaManager:
         Returns:
             Dictionary with execution statistics
         """
-        raise NotImplementedError("Subclasses must implement apply_schema_statements")
+        stats = {
+            "statements_executed": 0,
+            "statements_failed": 0,
+            "errors": [],
+        }
+
+        with self._driver.session() as session:
+            for stmt in statements:
+                # Strip comments
+                clean = "\n".join(
+                    line for line in stmt.splitlines() if not line.strip().startswith("//")
+                ).strip()
+                if not clean:
+                    continue
+                try:
+                    session.run(clean)
+                    stats["statements_executed"] += 1
+                    logger.debug("Applied schema statement: %s...", clean[:60])
+                except Exception as exc:
+                    stats["statements_failed"] += 1
+                    if skip_failed:
+                        logger.warning(
+                            "Schema statement failed (skipping): %s | %s", clean[:80], exc
+                        )
+                        stats["errors"].append(str(exc))
+                    else:
+                        raise
+
+        logger.info(
+            "Schema applied: %d statements executed, %d failed",
+            stats["statements_executed"],
+            stats["statements_failed"],
+        )
+        return stats
 
     def apply_single_statement(
         self,
@@ -150,7 +191,8 @@ class SchemaManager:
         Returns:
             Neo4j Result object
         """
-        raise NotImplementedError("Subclasses must implement apply_single_statement")
+        with self._driver.session() as session:
+            return session.run(statement, parameters or {})
 
     # ------------------------------------------------------------------
     # Index Management
@@ -174,7 +216,30 @@ class SchemaManager:
         Returns:
             True if index was created, False if it already existed
         """
-        raise NotImplementedError("Subclasses must implement create_index")
+        if index_name is None:
+            index_name = f"{label.lower()}_{property_name}_idx"
+
+        query_parts = [
+            "CREATE INDEX",
+            f"IF NOT EXISTS" if if_not_exists else "",
+            f"{index_name}",
+            f"FOR (n:{label})",
+            f"ON (n.{property_name})",
+        ]
+        query = " ".join(part for part in query_parts if part)
+
+        try:
+            with self._driver.session() as session:
+                session.run(query)
+            logger.info("Created index: %s", index_name)
+            return True
+        except Exception as exc:
+            if if_not_exists and "already exists" in str(exc).lower():
+                logger.info("Index already exists: %s", index_name)
+                return False
+            else:
+                logger.error("Failed to create index %s: %s", index_name, exc)
+                raise
 
     def create_fulltext_index(
         self,
@@ -207,7 +272,39 @@ class SchemaManager:
                 properties=["name", "qualified_name"]
             )
         """
-        raise NotImplementedError("Subclasses must implement create_fulltext_index")
+        if analyzer is None:
+            analyzer = "standard"
+
+        label_filters = ":".join(labels) if labels else ""
+        properties_str = ", ".join(properties)
+
+        query_parts = [
+            "CREATE FULLTEXT INDEX",
+            f"IF NOT EXISTS" if if_not_exists else "",
+            f"{index_name}",
+            f"FOR",
+            f"([{label_filters}])",
+            f"ON EACH",
+            f"[{properties_str}]",
+            f"OPTIONS {{ analyzer: '{analyzer}' }}",
+        ]
+        query = " ".join(part for part in query_parts if part)
+
+        try:
+            with self._driver.session() as session:
+                session.run(query)
+            logger.info("Created fulltext index: %s", index_name)
+            return True
+        except Exception as exc:
+            if if_not_exists and (
+                "already exists" in str(exc).lower()
+                or "equivalent fulltext index" in str(exc).lower()
+            ):
+                logger.info("Fulltext index already exists: %s", index_name)
+                return False
+            else:
+                logger.error("Failed to create fulltext index %s: %s", index_name, exc)
+                raise
 
     def create_vector_index(
         self,
@@ -233,7 +330,9 @@ class SchemaManager:
         Returns:
             True if index was created, False if it already existed
         """
-        raise NotImplementedError("Subclasses must implement create_vector_index")
+
+        logger.warning("Vector index creation not fully implemented for this Neo4j version")
+        return False
 
     def drop_index(
         self,
@@ -249,7 +348,23 @@ class SchemaManager:
         Returns:
             True if index was dropped, False if it didn't exist
         """
-        raise NotImplementedError("Subclasses must implement drop_index")
+        query_parts = ["DROP INDEX", f"IF EXISTS" if if_exists else "", f"{index_name}"]
+        query = " ".join(part for part in query_parts if part)
+
+        try:
+            with self._driver.session() as session:
+                session.run(query)
+            logger.info("Dropped index: %s", index_name)
+            return True
+        except Exception as exc:
+            if if_exists and (
+                "not found" in str(exc).lower() or "does not exist" in str(exc).lower()
+            ):
+                logger.info("Index does not exist: %s", index_name)
+                return False
+            else:
+                logger.error("Failed to drop index %s: %s", index_name, exc)
+                raise
 
     def list_indexes(self) -> list[dict[str, Any]]:
         """List all indexes in the database.
@@ -262,7 +377,28 @@ class SchemaManager:
             - properties: Indexed properties
             - state: Index state (ONLINE, POPULATING, etc.)
         """
-        raise NotImplementedError("Subclasses must implement list_indexes")
+        query = "SHOW INDEXES"
+        with self._driver.session() as session:
+            result = session.run(query)
+            indexes = []
+            for record in result:
+                indexes.append(
+                    {
+                        "name": record["name"],
+                        "type": record["type"],
+                        "label": record.get("labelsOrTypes", [None])[0]
+                        if record.get("labelsOrTypes")
+                        else None,
+                        "properties": record.get("properties", []),
+                        "state": record["state"],
+                        "owningConstraint": record.get("owningConstraint"),
+                        "indexPopulation": record.get("indexPopulation"),
+                        "entityType": record.get("entityType"),
+                        "labelsOrTypes": record.get("labelsOrTypes"),
+                        "properties": record.get("properties"),
+                    }
+                )
+            return indexes
 
     def index_exists(self, index_name: str) -> bool:
         """Check if an index exists by name.
@@ -273,7 +409,8 @@ class SchemaManager:
         Returns:
             True if index exists, False otherwise
         """
-        raise NotImplementedError("Subclasses must implement index_exists")
+        indexes = self.list_indexes()
+        return any(idx["name"] == index_name for idx in indexes)
 
     def create_standard_indexes(self) -> dict[str, Any]:
         """Create all standard indexes for AST-RAG schema.
@@ -283,7 +420,59 @@ class SchemaManager:
         Returns:
             Dictionary with creation statistics
         """
-        raise NotImplementedError("Subclasses must implement create_standard_indexes")
+        stats = {
+            "created": 0,
+            "skipped": 0,
+            "failed": 0,
+            "errors": [],
+        }
+
+        for label, property_name, index_name in self.STANDARD_INDEXES:
+            try:
+                if self.create_index(label, property_name, index_name, if_not_exists=True):
+                    stats["created"] += 1
+                else:
+                    stats["skipped"] += 1
+            except Exception as exc:
+                stats["failed"] += 1
+                stats["errors"].append(f"{index_name}: {exc}")
+                logger.error("Failed to create standard index %s: %s", index_name, exc)
+
+        # Create fulltext indexes
+        for index_name, labels, properties in [
+            idx for idx in self.STANDARD_INDEXES if isinstance(idx[1], list)
+        ]:
+            # Actually, STANDARD_INDEXES doesn't have fulltext in the same format
+            # Let's handle the fulltext index separately
+            pass
+
+        # Handle the fulltext index from STANDARD_INDEXES
+        # We know the fulltext index is defined as:
+        # ("ast_symbol_fulltext", ["Function", "Class", "Method"], ["name", "qualified_name"])
+        # But our STANDARD_INDEXES structure is different for fulltext
+        # Let's just create it directly
+        try:
+            if self.create_fulltext_index(
+                "ast_symbol_fulltext",
+                ["Function", "Class", "Method"],
+                ["name", "qualified_name"],
+                if_not_exists=True,
+            ):
+                stats["created"] += 1
+            else:
+                stats["skipped"] += 1
+        except Exception as exc:
+            stats["failed"] += 1
+            stats["errors"].append(f"ast_symbol_fulltext: {exc}")
+            logger.error("Failed to create standard fulltext index: %s", exc)
+
+        logger.info(
+            "Standard indexes: %d created, %d skipped, %d failed",
+            stats["created"],
+            stats["skipped"],
+            stats["failed"],
+        )
+        return stats
 
     # ------------------------------------------------------------------
     # Constraint Management
@@ -314,7 +503,30 @@ class SchemaManager:
         Returns:
             True if constraint was created, False if it already existed
         """
-        raise NotImplementedError("Subclasses must implement create_constraint")
+        query_parts = [
+            "CREATE CONSTRAINT",
+            f"IF NOT EXISTS" if if_not_exists else "",
+            f"{constraint_name}",
+            f"FOR (n:{label})",
+            f"REQUIRE n.{property_name}",
+            f"IS {constraint_type}" if constraint_type != "PROPERTY_EXISTENCE" else "",
+        ]
+
+        query_parts = [part for part in query_parts if part]
+        query = " ".join(query_parts)
+
+        try:
+            with self._driver.session() as session:
+                session.run(query)
+            logger.info("Created constraint: %s", constraint_name)
+            return True
+        except Exception as exc:
+            if if_not_exists and "already exists" in str(exc).lower():
+                logger.info("Constraint already exists: %s", constraint_name)
+                return False
+            else:
+                logger.error("Failed to create constraint %s: %s", constraint_name, exc)
+                raise
 
     def drop_constraint(
         self,
@@ -330,7 +542,23 @@ class SchemaManager:
         Returns:
             True if constraint was dropped, False if it didn't exist
         """
-        raise NotImplementedError("Subclasses must implement drop_constraint")
+        query_parts = ["DROP CONSTRAINT", f"IF EXISTS" if if_exists else "", f"{constraint_name}"]
+        query = " ".join(part for part in query_parts if part)
+
+        try:
+            with self._driver.session() as session:
+                session.run(query)
+            logger.info("Dropped constraint: %s", constraint_name)
+            return True
+        except Exception as exc:
+            if if_exists and (
+                "not found" in str(exc).lower() or "does not exist" in str(exc).lower()
+            ):
+                logger.info("Constraint does not exist: %s", constraint_name)
+                return False
+            else:
+                logger.error("Failed to drop constraint %s: %s", constraint_name, exc)
+                raise
 
     def list_constraints(self) -> list[dict[str, Any]]:
         """List all constraints in the database.
@@ -342,7 +570,22 @@ class SchemaManager:
             - label: Node label
             - properties: Constrained properties
         """
-        raise NotImplementedError("Subclasses must implement list_constraints")
+        query = "SHOW CONSTRAINTS"
+        with self._driver.session() as session:
+            result = session.run(query)
+            constraints = []
+            for record in result:
+                constraints.append(
+                    {
+                        "name": record["name"],
+                        "type": record["type"],
+                        "label": record.get("labelsOrTypes", [None])[0]
+                        if record.get("labelsOrTypes")
+                        else None,
+                        "properties": record.get("properties", []),
+                    }
+                )
+            return constraints
 
     def constraint_exists(self, constraint_name: str) -> bool:
         """Check if a constraint exists by name.
@@ -353,7 +596,8 @@ class SchemaManager:
         Returns:
             True if constraint exists, False otherwise
         """
-        raise NotImplementedError("Subclasses must implement constraint_exists")
+        constraints = self.list_constraints()
+        return any(c["name"] == constraint_name for c in constraints)
 
     def create_standard_constraints(self) -> dict[str, Any]:
         """Create all standard constraints for AST-RAG schema.
@@ -363,7 +607,33 @@ class SchemaManager:
         Returns:
             Dictionary with creation statistics
         """
-        raise NotImplementedError("Subclasses must implement create_standard_constraints")
+        stats = {
+            "created": 0,
+            "skipped": 0,
+            "failed": 0,
+            "errors": [],
+        }
+
+        for constraint_name, label, property_name, constraint_type in self.STANDARD_CONSTRAINTS:
+            try:
+                if self.create_constraint(
+                    constraint_name, label, property_name, constraint_type, if_not_exists=True
+                ):
+                    stats["created"] += 1
+                else:
+                    stats["skipped"] += 1
+            except Exception as exc:
+                stats["failed"] += 1
+                stats["errors"].append(f"{constraint_name}: {exc}")
+                logger.error("Failed to create standard constraint %s: %s", constraint_name, exc)
+
+        logger.info(
+            "Standard constraints: %d created, %d skipped, %d failed",
+            stats["created"],
+            stats["skipped"],
+            stats["failed"],
+        )
+        return stats
 
     # ------------------------------------------------------------------
     # Schema Validation
@@ -386,7 +656,20 @@ class SchemaManager:
             - warnings: List of warning messages
             - errors: List of error messages
         """
-        raise NotImplementedError("Subclasses must implement validate_schema")
+        # Validate indexes
+        index_validation = self.validate_indexes()
+        # Validate constraints
+        constraint_validation = self.validate_constraints()
+
+        is_valid = index_validation["is_valid"] and constraint_validation["is_valid"]
+
+        return {
+            "is_valid": is_valid,
+            "missing_indexes": index_validation["missing"],
+            "missing_constraints": constraint_validation["missing"],
+            "warnings": [],
+            "errors": [],
+        }
 
     def validate_indexes(self) -> dict[str, Any]:
         """Validate that all required indexes exist.
@@ -397,7 +680,21 @@ class SchemaManager:
             - missing: List of missing index names
             - present: List of present index names
         """
-        raise NotImplementedError("Subclasses must implement validate_indexes")
+        required_indexes = set()
+        # Add standard node property indexes
+        for label, property_name, index_name in self.STANDARD_INDEXES:
+            required_indexes.add(index_name)
+        # Add standard fulltext index
+        required_indexes.add("ast_symbol_fulltext")
+
+        present_indexes = {idx["name"] for idx in self.list_indexes()}
+        missing = required_indexes - present_indexes
+
+        return {
+            "is_valid": len(missing) == 0,
+            "missing": list(missing),
+            "present": list(present_indexes),
+        }
 
     def validate_constraints(self) -> dict[str, Any]:
         """Validate that all required constraints exist.
@@ -408,7 +705,18 @@ class SchemaManager:
             - missing: List of missing constraint names
             - present: List of present constraint names
         """
-        raise NotImplementedError("Subclasses must implement validate_constraints")
+        required_constraints = set()
+        for constraint_name, label, property_name, constraint_type in self.STANDARD_CONSTRAINTS:
+            required_constraints.add(constraint_name)
+
+        present_constraints = {c["name"] for c in self.list_constraints()}
+        missing = required_constraints - present_constraints
+
+        return {
+            "is_valid": len(missing) == 0,
+            "missing": list(missing),
+            "present": list(present_constraints),
+        }
 
     def get_schema_version(self) -> Optional[str]:
         """Get the current schema version from the database.
@@ -416,7 +724,9 @@ class SchemaManager:
         Returns:
             Schema version string or None if not set
         """
-        raise NotImplementedError("Subclasses must implement get_schema_version")
+        # This would require a version node, e.g., CurrentVersion
+        # For now, we return None as it's not implemented
+        return None
 
     def set_schema_version(self, version: str) -> None:
         """Set the schema version in the database.
@@ -424,7 +734,9 @@ class SchemaManager:
         Args:
             version: Schema version string (e.g., "1.0.0")
         """
-        raise NotImplementedError("Subclasses must implement set_schema_version")
+        # This would create/update a version node
+        # For now, we do nothing
+        pass
 
     # ------------------------------------------------------------------
     # Schema Introspection
@@ -441,7 +753,48 @@ class SchemaManager:
             - indexes: List of index metadata
             - constraints: List of constraint metadata
         """
-        raise NotImplementedError("Subclasses must implement get_schema_info")
+        with self._driver.session() as session:
+            # Get node labels and counts
+            label_query = """
+            CALL db.labels() YIELD label
+            CALL apoc.cypher.run('MATCH (n:`' + label + '`) RETURN count(n) AS count', {}) YIELD value
+            RETURN label, value.count AS count
+            """
+            # Since we don't know if apoc is available, we'll do it differently
+            labels_query = "CALL db.labels() YIELD label RETURN label"
+            label_counts = {}
+            for record in self._driver.session().run(labels_query):
+                label = record["label"]
+                count_query = f"MATCH (n:`{label}`) RETURN count(n) AS count"
+                count = self._driver.session().run(count_query).single()["count"]
+                label_counts[label] = count
+
+            # Get relationship types and counts
+            rel_query = "CALL db.relationshipTypes() YIELD relationshipType RETURN relationshipType"
+            rel_counts = {}
+            for record in self._driver.session().run(rel_query):
+                rel_type = record["relationshipType"]
+                count_query = f"MATCH ()-[r:`{rel_type}`]->() RETURN count(r) AS count"
+                count = self._driver.session().run(count_query).single()["count"]
+                rel_counts[rel_type] = count
+
+            # Get property keys
+            prop_query = "CALL db.propertyKeys() YIELD propertyKey RETURN propertyKey"
+            property_keys = [
+                record["propertyKey"] for record in self._driver.session().run(prop_query)
+            ]
+
+            # Get indexes and constraints
+            indexes = self.list_indexes()
+            constraints = self.list_constraints()
+
+            return {
+                "labels": [{"label": k, "count": v} for k, v in label_counts.items()],
+                "relationship_types": [{"type": k, "count": v} for k, v in rel_counts.items()],
+                "property_keys": property_keys,
+                "indexes": indexes,
+                "constraints": constraints,
+            }
 
     def get_node_labels(self) -> list[str]:
         """Get all node labels in the database.
@@ -449,7 +802,8 @@ class SchemaManager:
         Returns:
             List of label names
         """
-        raise NotImplementedError("Subclasses must implement get_node_labels")
+        query = "CALL db.labels() YIELD label RETURN label"
+        return [record["label"] for record in self._driver.session().run(query)]
 
     def get_relationship_types(self) -> list[str]:
         """Get all relationship types in the database.
@@ -457,7 +811,8 @@ class SchemaManager:
         Returns:
             List of relationship type names
         """
-        raise NotImplementedError("Subclasses must implement get_relationship_types")
+        query = "CALL db.relationshipTypes() YIELD relationshipType RETURN relationshipType"
+        return [record["relationshipType"] for record in self._driver.session().run(query)]
 
     def get_property_keys(self) -> list[str]:
         """Get all property keys in the database.
@@ -465,7 +820,8 @@ class SchemaManager:
         Returns:
             List of property key names
         """
-        raise NotImplementedError("Subclasses must implement get_property_keys")
+        query = "CALL db.propertyKeys() YIELD propertyKey RETURN propertyKey"
+        return [record["propertyKey"] for record in self._driver.session().run(query)]
 
     def get_label_counts(self) -> dict[str, int]:
         """Get node counts per label.
@@ -473,7 +829,11 @@ class SchemaManager:
         Returns:
             Dictionary mapping label names to node counts
         """
-        raise NotImplementedError("Subclasses must implement get_label_counts")
+        counts = {}
+        for label in self.get_node_labels():
+            query = f"MATCH (n:`{label}`) RETURN count(n) AS count"
+            counts[label] = self._driver.session().run(query).single()["count"]
+        return counts
 
     def get_relationship_counts(self) -> dict[str, int]:
         """Get relationship counts per type.
@@ -481,7 +841,11 @@ class SchemaManager:
         Returns:
             Dictionary mapping relationship types to counts
         """
-        raise NotImplementedError("Subclasses must implement get_relationship_counts")
+        counts = {}
+        for rel_type in self.get_relationship_types():
+            query = f"MATCH ()-[r:`{rel_type}`]->() RETURN count(r) AS count"
+            counts[rel_type] = self._driver.session().run(query).single()["count"]
+        return counts
 
     # ------------------------------------------------------------------
     # Schema Migration
@@ -506,7 +870,14 @@ class SchemaManager:
             - statements_executed: Number of statements run
             - errors: List of errors if any
         """
-        raise NotImplementedError("Subclasses must implement migrate_schema")
+        # For now, we just apply the migration script as a schema file
+        # In a real implementation, we would check the current version
+        result = self.apply_schema_file(migration_script, skip_failed=False)
+        return {
+            "success": result["statements_failed"] == 0,
+            "statements_executed": result["statements_executed"],
+            "errors": result["errors"],
+        }
 
     def rollback_migration(
         self,
@@ -524,13 +895,19 @@ class SchemaManager:
         Returns:
             Dictionary with rollback results
         """
-        raise NotImplementedError("Subclasses must implement rollback_migration")
+        # Similar to migrate, but in reverse
+        result = self.apply_schema_file(rollback_script, skip_failed=False)
+        return {
+            "success": result["statements_failed"] == 0,
+            "statements_executed": result["statements_executed"],
+            "errors": result["errors"],
+        }
 
     # ------------------------------------------------------------------
     # Context Manager Support
     # ------------------------------------------------------------------
 
-    def __enter__(self) -> SchemaManager:
+    def __enter__(self) -> "SchemaManager":
         """Enter context manager."""
         return self
 

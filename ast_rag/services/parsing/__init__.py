@@ -22,6 +22,8 @@ LANGUAGE_QUERIES: dict[str, dict[str, str]] = {
 
 from ast_rag.services.parsing.block_extractor import BlockExtractor
 from ast_rag.services.parsing.parser_manager import ParserManager
+from ast_rag.services.parsing.node_extractor import NodeExtractor
+from ast_rag.services.parsing.edge_extractor import EdgeExtractor
 
 __all__ = [
     "LANGUAGE_QUERIES",
@@ -32,4 +34,6 @@ __all__ = [
     "TYPESCRIPT_QUERIES",
     "BlockExtractor",
     "ParserManager",
+    "NodeExtractor",
+    "EdgeExtractor",
 ]
