@@ -327,23 +327,109 @@ LIMIT 500
         file_path: str,
         start_line: int,
         end_line: int,
+        context_lines: int = 0,
     ) -> str:
         """Read and return the source lines [start_line, end_line] (1-indexed).
 
-        Returns an empty string if the file cannot be read.
+        Args:
+            file_path: Path to the source file (absolute or relative)
+            start_line: Starting line number (1-indexed, inclusive)
+            end_line: Ending line number (1-indexed, inclusive)
+            context_lines: Number of context lines to include before/after (default 0)
+
+        Returns:
+            Source code snippet as string, or empty string if file cannot be read.
+
+        Features:
+            - Handles both absolute and relative paths
+            - Gracefully handles out-of-bounds line numbers
+            - Includes optional context lines around the snippet
+            - Detects and skips binary files
+            - Auto-detects encoding when UTF-8 fails
         """
         try:
             path = Path(file_path)
+
+            # Try to resolve relative paths from common roots
+            if not path.is_absolute():
+                # Try current directory first
+                if not path.exists():
+                    # Try common project root indicators
+                    for root_marker in ["pyproject.toml", "setup.py", "package.json", ".git"]:
+                        root_paths = list(Path.cwd().rglob(root_marker))
+                        if root_paths:
+                            project_root = root_paths[0].parent
+                            potential_path = project_root / path
+                            if potential_path.exists():
+                                path = potential_path
+                                break
+
             if not path.exists():
                 logger.warning("File not found: %s", file_path)
                 return ""
-            lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
-            # Clamp to valid range (1-indexed)
-            s = max(0, start_line - 1)
-            e = min(len(lines), end_line)
-            return "\n".join(lines[s:e])
+
+            # Check if file is binary (first 8KB)
+            try:
+                with open(path, "rb") as f:
+                    chunk = f.read(8192)
+                    if b"\x00" in chunk:  # Null byte suggests binary
+                        logger.warning("Binary file detected: %s", file_path)
+                        return ""
+            except OSError:
+                pass
+
+            # Try UTF-8 first, then fallback to system default
+            try:
+                content = path.read_text(encoding="utf-8")
+            except UnicodeDecodeError:
+                try:
+                    content = path.read_text(encoding="utf-8-sig")  # Handle BOM
+                except UnicodeDecodeError:
+                    content = path.read_text(encoding="latin-1")  # Fallback
+
+            lines = content.splitlines()
+            total_lines = len(lines)
+
+            # Handle out-of-bounds gracefully
+            if total_lines == 0:
+                return ""
+
+            # Clamp line numbers to valid range (1-indexed)
+            # Add context lines if requested
+            s = max(0, start_line - 1 - context_lines)
+            e = min(total_lines, end_line + context_lines)
+
+            if s >= e:
+                logger.warning(
+                    "Invalid line range [%d, %d] for file with %d lines",
+                    start_line,
+                    end_line,
+                    total_lines,
+                )
+                return ""
+
+            # Build the snippet with optional line numbers
+            snippet_lines = lines[s:e]
+
+            # Add line numbers if context_lines > 0 or if snippet is large
+            if context_lines > 0 or len(snippet_lines) > 20:
+                # Add line numbers with padding
+                max_line_num_width = len(str(e))
+                numbered_lines = []
+                for i, line in enumerate(snippet_lines):
+                    line_num = s + i + 1
+                    # Mark original range with '>' prefix
+                    prefix = ">" if start_line <= line_num <= end_line else " "
+                    numbered_lines.append(f"{prefix}{line_num:>{max_line_num_width}} | {line}")
+                return "\n".join(numbered_lines)
+            else:
+                return "\n".join(snippet_lines)
+
         except OSError as exc:
             logger.error("Cannot read snippet from %s: %s", file_path, exc)
+            return ""
+        except Exception as exc:
+            logger.error("Unexpected error reading %s: %s", file_path, exc)
             return ""
 
     # ------------------------------------------------------------------
@@ -743,6 +829,11 @@ LIMIT $limit
               - has_more: boolean indicating more results exist
         """
         SEARCH_TOTAL.labels(lang=lang or "any", kind=kind or "any").inc()
+
+        # Validate pagination parameters
+        limit = min(max(1, limit), 500)  # Ensure positive, cap at 500
+        offset = max(0, offset)  # Ensure non-negative
+
         # 1. Find definition(s)
         definitions = self.find_definition(name, kind=kind, lang=lang)
         if not definitions:
@@ -754,26 +845,87 @@ LIMIT $limit
                 "has_more": False,
             }
 
-        # 2. For each definition, find references (CALLS, TYPES, etc.)
+        # 2. For each definition, find references with database-level pagination
         all_refs = []
+        total_count = 0
+
+        # Calculate remaining capacity for this page
+        remaining_limit = limit
+        current_offset = offset
+
         for definition in definitions:
-            refs = self._find_usages_of_node(definition.id)
-            all_refs.extend(refs)
+            if remaining_limit <= 0:
+                # We've filled our page, just count remaining
+                count = self._count_usages_of_node(definition.id)
+                total_count += count
+                continue
 
-        # 3. Apply pagination
-        total = len(all_refs)
-        paginated_refs = all_refs[offset : offset + limit]
+            # Get paginated references for this definition
+            refs, def_total = self._find_usages_of_node_paginated(
+                definition.id, limit=remaining_limit, offset=current_offset
+            )
 
+            total_count += def_total
+
+            # Adjust offset for next definition
+            if current_offset >= def_total:
+                # Skip this definition entirely for this page
+                current_offset = current_offset - def_total
+            else:
+                # Take refs from this definition
+                all_refs.extend(refs)
+                remaining_limit -= len(refs)
+                current_offset = 0  # Reset offset for subsequent definitions
+
+        # 3. Return paginated result
         return {
-            "references": paginated_refs,
-            "total": total,
+            "references": all_refs,
+            "total": total_count,
             "limit": limit,
             "offset": offset,
-            "has_more": total > offset + limit,
+            "has_more": total_count > offset + limit,
         }
 
-    def _find_usages_of_node(self, node_id: str) -> list[dict]:
-        """Find all usages/references of a given node.
+    def _count_usages_of_node(self, node_id: str) -> int:
+        """Count total references/usages of a given node.
+
+        Returns the total count across all reference types.
+        """
+        count_cypher = """
+MATCH (caller)-[r:CALLS]->(target {id: $node_id})
+WHERE caller.valid_to IS NULL AND r.valid_to IS NULL
+RETURN count(*) as count
+"""
+        types_count_cypher = """
+MATCH (user)-[r:TYPES]->(target {id: $node_id})
+WHERE user.valid_to IS NULL AND r.valid_to IS NULL
+RETURN count(*) as count
+"""
+        inherits_count_cypher = """
+MATCH (child)-[r:INHERITS|EXTENDS|IMPLEMENTS]->(parent {id: $node_id})
+WHERE child.valid_to IS NULL AND r.valid_to IS NULL
+RETURN count(*) as count
+"""
+        total = 0
+        with self._driver.session() as session:
+            result = session.run(count_cypher, node_id=node_id)
+            record = result.single()
+            total += record["count"] if record else 0
+
+            result = session.run(types_count_cypher, node_id=node_id)
+            record = result.single()
+            total += record["count"] if record else 0
+
+            result = session.run(inherits_count_cypher, node_id=node_id)
+            record = result.single()
+            total += record["count"] if record else 0
+
+        return total
+
+    def _find_usages_of_node_paginated(
+        self, node_id: str, limit: int = 50, offset: int = 0
+    ) -> tuple[list[dict], int]:
+        """Find all usages/references of a given node with database-level pagination.
 
         Searches for:
         - CALLS edges pointing to this node (function/method calls)
@@ -781,24 +933,27 @@ LIMIT $limit
         - INHERITS/EXTENDS/IMPLEMENTS edges (for classes/traits)
 
         Returns:
-            List of reference dicts with location and context
+            Tuple of (list of reference dicts, total count)
         """
         node = self.get_node(node_id)
         if not node:
-            return []
+            return [], 0
 
         references = []
 
-        # Query for incoming CALLS edges (who calls this function/method)
-        calls_cypher = """
-MATCH (caller)-[r:CALLS]->(target {id: $node_id})
+        # First, get total count
+        total = self._count_usages_of_node(node_id)
+
+        # Query for incoming CALLS edges with pagination
+        calls_cypher = f"""
+MATCH (caller)-[r:CALLS]->(target {{id: $node_id}})
 WHERE caller.valid_to IS NULL AND r.valid_to IS NULL
 RETURN caller, r
 ORDER BY caller.qualified_name
-LIMIT 200
+SKIP $offset LIMIT $limit
 """
         with self._driver.session() as session:
-            for record in session.run(calls_cypher, node_id=node_id):
+            for record in session.run(calls_cypher, node_id=node_id, offset=offset, limit=limit):
                 caller_data = dict(record["caller"])
                 edge_data = dict(record["r"])
                 references.append(
@@ -813,16 +968,16 @@ LIMIT 200
                     }
                 )
 
-        # Query for incoming TYPES edges (who uses this as a type)
-        types_cypher = """
-MATCH (user)-[r:TYPES]->(target {id: $node_id})
+        # Query for incoming TYPES edges with pagination
+        types_cypher = f"""
+MATCH (user)-[r:TYPES]->(target {{id: $node_id}})
 WHERE user.valid_to IS NULL AND r.valid_to IS NULL
 RETURN user, r
 ORDER BY user.qualified_name
-LIMIT 200
+SKIP $offset LIMIT $limit
 """
         with self._driver.session() as session:
-            for record in session.run(types_cypher, node_id=node_id):
+            for record in session.run(types_cypher, node_id=node_id, offset=offset, limit=limit):
                 user_data = dict(record["user"])
                 edge_data = dict(record["r"])
                 references.append(
@@ -837,16 +992,16 @@ LIMIT 200
                     }
                 )
 
-        # Query for incoming INHERITS/EXTENDS/IMPLEMENTS edges (for classes)
-        inherits_cypher = """
-MATCH (child)-[r:INHERITS|EXTENDS|IMPLEMENTS]->(parent {id: $node_id})
+        # Query for incoming INHERITS/EXTENDS/IMPLEMENTS edges with pagination
+        inherits_cypher = f"""
+MATCH (child)-[r:INHERITS|EXTENDS|IMPLEMENTS]->(parent {{id: $node_id}})
 WHERE child.valid_to IS NULL AND r.valid_to IS NULL
 RETURN child, r, type(r) as rel_type
 ORDER BY child.qualified_name
-LIMIT 200
+SKIP $offset LIMIT $limit
 """
         with self._driver.session() as session:
-            for record in session.run(inherits_cypher, node_id=node_id):
+            for record in session.run(inherits_cypher, node_id=node_id, offset=offset, limit=limit):
                 child_data = dict(record["child"])
                 edge_data = dict(record["r"])
                 references.append(
@@ -881,7 +1036,7 @@ LIMIT 200
                 }
             )
 
-        return result
+        return result, total
 
     # ------------------------------------------------------------------
     # Git diff - code evolution analysis

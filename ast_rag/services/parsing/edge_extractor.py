@@ -604,15 +604,26 @@ class EdgeExtractor:
         if lang not in ("cpp", "java", "rust"):
             return edges
 
+        file_node_id = hashlib.sha256(
+            f"{file_path}:{NodeKind.FILE.value}:{file_path}".encode()
+        ).hexdigest()[:24]
+
         for node in tree.root_node.children:
             if node.type in ("identifier", "path_expression"):
                 symbol_name = _node_text(node, source)
                 if self._is_cross_file_reference(symbol_name, lang, file_path):
                     target_id = hashlib.sha256(f"crossfile:{symbol_name}".encode()).hexdigest()[:24]
+                    enclosing_method = None
+                    for n in nodes:
+                        if n.kind in (NodeKind.METHOD, NodeKind.FUNCTION, NodeKind.CONSTRUCTOR, NodeKind.DESTRUCTOR):
+                            if n.start_byte <= node.start_byte and n.end_byte >= node.end_byte:
+                                if enclosing_method is None or (n.end_byte - n.start_byte) < (enclosing_method.end_byte - enclosing_method.start_byte):
+                                    enclosing_method = n
+                    from_id = enclosing_method.id if enclosing_method else file_node_id
                     edges.append(
                         ASTEdge(
                             kind=EdgeKind.CROSS_FILE_CALL,
-                            from_id="",
+                            from_id=from_id,
                             to_id=target_id,
                             label=symbol_name,
                             confidence=0.3,

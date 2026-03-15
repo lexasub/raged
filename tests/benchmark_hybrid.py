@@ -35,13 +35,14 @@ import numpy as np
 from ast_rag.models import ProjectConfig
 from ast_rag.graph_schema import create_driver
 from ast_rag.embeddings import EmbeddingManager
-from ast_rag.services.api import ASTRagAPI
+from ast_rag.api import ASTRagAPI
 
 logger = logging.getLogger(__name__)
 
 # ============================================================================
 # NDCG Calculation
 # ============================================================================
+
 
 def dcg_at_k(relevance_scores: list[float], k: int) -> float:
     """Compute Discounted Cumulative Gain at k."""
@@ -51,7 +52,10 @@ def dcg_at_k(relevance_scores: list[float], k: int) -> float:
         dcg += score / np.log2(i + 2)
     return dcg
 
-def ndcg_at_k(relevance_scores: list[float], k: int, ideal_scores: Optional[list[float]] = None) -> float:
+
+def ndcg_at_k(
+    relevance_scores: list[float], k: int, ideal_scores: Optional[list[float]] = None
+) -> float:
     """Compute Normalized Discounted Cumulative Gain at k.
 
     Args:
@@ -77,9 +81,11 @@ def ndcg_at_k(relevance_scores: list[float], k: int, ideal_scores: Optional[list
         return 0.0
     return dcg / idcg
 
+
 # ============================================================================
 # Benchmark Runner
 # ============================================================================
+
 
 class HybridSearchBenchmark:
     """Benchmark hybrid search with different weight configurations."""
@@ -122,12 +128,12 @@ class HybridSearchBenchmark:
             if node.qualified_name == qualified_name:
                 logger.debug(
                     "Found node with matching qualified_name but different file: %s (expected %s)",
-                    node.file_path, file_path
+                    node.file_path,
+                    file_path,
                 )
                 return node.id
         logger.warning(
-            "Could not resolve node: %s in %s (kind=%s)",
-            qualified_name, file_path, kind
+            "Could not resolve node: %s in %s (kind=%s)", qualified_name, file_path, kind
         )
         return None
 
@@ -146,10 +152,9 @@ class HybridSearchBenchmark:
             for item in raw_items:
                 if "id" in item:
                     # Already a node ID, use as-is
-                    relevant_items.append({
-                        "id": item["id"],
-                        "score": float(item.get("score", 1.0))
-                    })
+                    relevant_items.append(
+                        {"id": item["id"], "score": float(item.get("score", 1.0))}
+                    )
                 elif all(k in item for k in ("qualified_name", "file_path", "kind")):
                     # Identifier-based entry, resolve to ID
                     node_id = self._resolve_identifier(
@@ -158,21 +163,16 @@ class HybridSearchBenchmark:
                         kind=item["kind"],
                     )
                     if node_id:
-                        relevant_items.append({
-                            "id": node_id,
-                            "score": float(item.get("score", 1.0))
-                        })
+                        relevant_items.append(
+                            {"id": node_id, "score": float(item.get("score", 1.0))}
+                        )
                 else:
                     logger.warning("Invalid ground truth item: %s", item)
 
             if relevant_items:
                 resolved[query] = relevant_items
 
-        logger.info(
-            "Resolved %d/%d queries with ground truth items",
-            len(resolved),
-            len(queries)
-        )
+        logger.info("Resolved %d/%d queries with ground truth items", len(resolved), len(queries))
         return resolved
 
     def evaluate_config(
@@ -271,26 +271,29 @@ class HybridSearchBenchmark:
         return {
             "pure_vector": pure_vector["avg_ndcg@10"],
             "pure_keyword": pure_keyword["avg_ndcg@10"],
-            "improvement_over_vector": (
-                pure_keyword["avg_ndcg@10"] - pure_vector["avg_ndcg@10"]
-            ) / max(pure_vector["avg_ndcg@10"], 1e-8),
+            "improvement_over_vector": (pure_keyword["avg_ndcg@10"] - pure_vector["avg_ndcg@10"])
+            / max(pure_vector["avg_ndcg@10"], 1e-8),
         }
+
 
 # ============================================================================
 # Main
 # ============================================================================
 
+
 def load_config(config_path: str) -> ProjectConfig:
     """Load ProjectConfig from JSON file."""
-    with open(config_path, 'r') as f:
+    with open(config_path, "r") as f:
         data = json.load(f)
     return ProjectConfig(**data)
 
+
 def load_ground_truth(queries_path: str) -> dict[str, Any]:
     """Load ground truth queries and relevance judgments."""
-    with open(queries_path, 'r') as f:
+    with open(queries_path, "r") as f:
         data = json.load(f)
     return data
+
 
 def main():
     parser = argparse.ArgumentParser(description="Benchmark hybrid search weights")
@@ -298,9 +301,16 @@ def main():
     parser.add_argument("--queries", required=True, help="Path to ground truth queries JSON")
     parser.add_argument("--output", default="benchmark_results.json", help="Output results JSON")
     parser.add_argument("--k", type=int, default=10, help="Cutoff for NDCG@k (default: 10)")
-    parser.add_argument("--steps", type=float, nargs="+", default=[0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
-                        help="Weight values to test")
-    parser.add_argument("--log-level", default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR"])
+    parser.add_argument(
+        "--steps",
+        type=float,
+        nargs="+",
+        default=[0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
+        help="Weight values to test",
+    )
+    parser.add_argument(
+        "--log-level", default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR"]
+    )
 
     args = parser.parse_args()
 
@@ -344,7 +354,10 @@ def main():
         for i, res in enumerate(results[:5], 1):
             logger.info(
                 "  %d. vec=%.2f, kw=%.2f → NDCG@10=%.4f",
-                i, res["vector_weight"], res["keyword_weight"], res["avg_ndcg@10"]
+                i,
+                res["vector_weight"],
+                res["keyword_weight"],
+                res["avg_ndcg@10"],
             )
 
         # Compute improvement over pure vector
@@ -352,8 +365,12 @@ def main():
         pure_vector_ndcg = comparison["pure_vector"]
         improvement = (best["avg_ndcg@10"] - pure_vector_ndcg) / max(pure_vector_ndcg, 1e-8) * 100
 
-        logger.info("Best configuration: vec=%.2f, kw=%.2f → NDCG@10=%.4f",
-                    best["vector_weight"], best["keyword_weight"], best["avg_ndcg@10"])
+        logger.info(
+            "Best configuration: vec=%.2f, kw=%.2f → NDCG@10=%.4f",
+            best["vector_weight"],
+            best["keyword_weight"],
+            best["avg_ndcg@10"],
+        )
         logger.info("Improvement over pure vector: %.2f%%", improvement)
 
         # Save results
@@ -368,7 +385,7 @@ def main():
             "all_results": results[:20],  # Save top 20
         }
 
-        with open(args.output, 'w') as f:
+        with open(args.output, "w") as f:
             json.dump(output, f, indent=2)
         logger.info("Results saved to %s", args.output)
 
@@ -382,6 +399,7 @@ def main():
 
     finally:
         driver.close()
+
 
 if __name__ == "__main__":
     sys.exit(main())

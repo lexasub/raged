@@ -40,7 +40,7 @@ from ast_rag.services.graph_updater_service import (
     apply_workspace_diff,
 )
 from ast_rag.services.embedding_manager import EmbeddingManager
-from ast_rag.services.api import ASTRagAPI
+from ast_rag.api import ASTRagAPI
 from ast_rag.utils.output import get_formatter
 from ast_rag.services.summarizer_service import SummarizerService
 
@@ -693,7 +693,7 @@ def evaluate(
     import time
     from pathlib import Path
 
-    from ast_rag.services.api import ASTRagAPI
+    from ast_rag.api import ASTRagAPI
     from ast_rag.repositories import create_driver
     from ast_rag.services.embedding_manager import EmbeddingManager
 

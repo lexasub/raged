@@ -13,12 +13,15 @@ a clean API for the rest of the application.
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Optional
 from collections.abc import Iterable
 
-from neo4j import Driver, Session, Result
+from neo4j import Driver, GraphDatabase, Session, Result
 
 from ast_rag.dto import ASTNode, ASTEdge, Neo4jConfig
+
+logger = logging.getLogger(__name__)
 
 
 class Neo4jRepository:
@@ -63,7 +66,10 @@ class Neo4jRepository:
 
     def _create_driver(self) -> Driver:
         """Create Neo4j driver from configuration."""
-        raise NotImplementedError("Subclasses must implement _create_driver")
+        return GraphDatabase.driver(
+            self._config.uri,
+            auth=(self._config.user, self._config.password),
+        )
 
     def close(self) -> None:
         """Close the Neo4j driver connection."""
@@ -85,7 +91,17 @@ class Neo4jRepository:
         Returns:
             ASTNode if found, None otherwise
         """
-        raise NotImplementedError("Subclasses must implement get_node")
+        label_clause = f":{label}" if label else ""
+        query = f"""
+MATCH (n{label_clause} {{id: $node_id}})
+RETURN n
+"""
+        with self.driver.session() as session:
+            result = session.run(query, node_id=node_id)
+            record = result.single()
+            if record is None:
+                return None
+            return self._record_to_node(record["n"])
 
     def get_nodes_by_ids(
         self,
@@ -101,7 +117,18 @@ class Neo4jRepository:
         Returns:
             List of ASTNode objects (may be fewer than requested if some not found)
         """
-        raise NotImplementedError("Subclasses must implement get_nodes_by_ids")
+        if not node_ids:
+            return []
+
+        label_clause = f":{label}" if label else ""
+        query = f"""
+MATCH (n{label_clause})
+WHERE n.id IN $node_ids
+RETURN n
+"""
+        with self.driver.session() as session:
+            result = session.run(query, node_ids=node_ids)
+            return [self._record_to_node(record["n"]) for record in result]
 
     def get_node_by_property(
         self,
@@ -119,7 +146,17 @@ class Neo4jRepository:
         Returns:
             ASTNode if found, None otherwise
         """
-        raise NotImplementedError("Subclasses must implement get_node_by_property")
+        query = f"""
+MATCH (n:{label} {{{property_name}: $property_value}})
+RETURN n
+LIMIT 1
+"""
+        with self.driver.session() as session:
+            result = session.run(query, property_value=property_value)
+            record = result.single()
+            if record is None:
+                return None
+            return self._record_to_node(record["n"])
 
     def create_node(self, node: ASTNode, label: Optional[str] = None) -> ASTNode:
         """Create a new node in the graph.
@@ -131,7 +168,16 @@ class Neo4jRepository:
         Returns:
             The created ASTNode
         """
-        raise NotImplementedError("Subclasses must implement create_node")
+        node_label = label or node.kind.value
+        props = self._node_to_props(node)
+        query = f"""
+CREATE (n:{node_label} $props)
+RETURN n
+"""
+        with self.driver.session() as session:
+            result = session.run(query, props=props)
+            record = result.single()
+            return self._record_to_node(record["n"])
 
     def create_nodes(self, nodes: Iterable[ASTNode]) -> list[ASTNode]:
         """Batch create multiple nodes.
@@ -142,7 +188,31 @@ class Neo4jRepository:
         Returns:
             List of created ASTNode objects
         """
-        raise NotImplementedError("Subclasses must implement create_nodes")
+        nodes_list = list(nodes)
+        if not nodes_list:
+            return []
+
+        # Group nodes by label for batch creation
+        nodes_by_label: dict[str, list[dict[str, Any]]] = {}
+        for node in nodes_list:
+            label = node.kind.value
+            if label not in nodes_by_label:
+                nodes_by_label[label] = []
+            nodes_by_label[label].append(self._node_to_props(node))
+
+        created_nodes: list[ASTNode] = []
+        with self.driver.session() as session:
+            for label, props_list in nodes_by_label.items():
+                query = f"""
+UNWIND $batch AS props
+CREATE (n:{label} $props)
+RETURN n
+"""
+                result = session.run(query, batch=props_list)
+                for record in result:
+                    created_nodes.append(self._record_to_node(record["n"]))
+
+        return created_nodes
 
     def update_node(
         self,
@@ -160,7 +230,18 @@ class Neo4jRepository:
         Returns:
             Updated ASTNode if found, None otherwise
         """
-        raise NotImplementedError("Subclasses must implement update_node")
+        label_clause = f":{label}" if label else ""
+        query = f"""
+MATCH (n{label_clause} {{id: $node_id}})
+SET n += $properties
+RETURN n
+"""
+        with self.driver.session() as session:
+            result = session.run(query, node_id=node_id, properties=properties)
+            record = result.single()
+            if record is None:
+                return None
+            return self._record_to_node(record["n"])
 
     def delete_node(self, node_id: str, label: Optional[str] = None) -> bool:
         """Delete a single node by its ID.
@@ -172,7 +253,16 @@ class Neo4jRepository:
         Returns:
             True if node was deleted, False if not found
         """
-        raise NotImplementedError("Subclasses must implement delete_node")
+        label_clause = f":{label}" if label else ""
+        query = f"""
+MATCH (n{label_clause} {{id: $node_id}})
+DETACH DELETE n
+RETURN count(n) as deleted
+"""
+        with self.driver.session() as session:
+            result = session.run(query, node_id=node_id)
+            record = result.single()
+            return record["deleted"] > 0
 
     def delete_nodes(self, node_ids: list[str], label: Optional[str] = None) -> int:
         """Batch delete multiple nodes by their IDs.
@@ -184,7 +274,20 @@ class Neo4jRepository:
         Returns:
             Number of nodes actually deleted
         """
-        raise NotImplementedError("Subclasses must implement delete_nodes")
+        if not node_ids:
+            return 0
+
+        label_clause = f":{label}" if label else ""
+        query = f"""
+MATCH (n{label_clause})
+WHERE n.id IN $node_ids
+DETACH DELETE n
+RETURN count(n) as deleted
+"""
+        with self.driver.session() as session:
+            result = session.run(query, node_ids=node_ids)
+            record = result.single()
+            return record["deleted"]
 
     def node_exists(self, node_id: str, label: Optional[str] = None) -> bool:
         """Check if a node exists by its ID.
@@ -196,7 +299,15 @@ class Neo4jRepository:
         Returns:
             True if node exists, False otherwise
         """
-        raise NotImplementedError("Subclasses must implement node_exists")
+        label_clause = f":{label}" if label else ""
+        query = f"""
+MATCH (n{label_clause} {{id: $node_id}})
+RETURN count(n) > 0 as exists
+"""
+        with self.driver.session() as session:
+            result = session.run(query, node_id=node_id)
+            record = result.single()
+            return record["exists"]
 
     # ------------------------------------------------------------------
     # Edge Operations
@@ -211,7 +322,22 @@ class Neo4jRepository:
         Returns:
             The created ASTEdge
         """
-        raise NotImplementedError("Subclasses must implement create_edge")
+        props = self._edge_to_props(edge)
+        query = """
+MATCH (a {id: $from_id})
+MATCH (b {id: $to_id})
+CREATE (a)-[r:RELATES $props]->(b)
+RETURN r, a.id as from_id, b.id as to_id
+"""
+        with self.driver.session() as session:
+            result = session.run(
+                query,
+                from_id=edge.from_id,
+                to_id=edge.to_id,
+                props=props,
+            )
+            record = result.single()
+            return self._record_to_edge(record["r"], record["from_id"], record["to_id"])
 
     def create_edges(self, edges: Iterable[ASTEdge]) -> list[ASTEdge]:
         """Batch create multiple edges.
@@ -222,7 +348,27 @@ class Neo4jRepository:
         Returns:
             List of created ASTEdge objects
         """
-        raise NotImplementedError("Subclasses must implement create_edges")
+        edges_list = list(edges)
+        if not edges_list:
+            return []
+
+        batch = [self._edge_to_props(e) for e in edges_list]
+        query = """
+UNWIND $batch AS props
+MATCH (a {id: props.from_id})
+MATCH (b {id: props.to_id})
+CREATE (a)-[r:RELATES]->(b)
+SET r += props
+RETURN r, a.id as from_id, b.id as to_id
+"""
+        created_edges: list[ASTEdge] = []
+        with self.driver.session() as session:
+            result = session.run(query, batch=batch)
+            for record in result:
+                created_edges.append(
+                    self._record_to_edge(record["r"], record["from_id"], record["to_id"])
+                )
+        return created_edges
 
     def get_edge(self, edge_id: str, edge_type: Optional[str] = None) -> Optional[ASTEdge]:
         """Retrieve a single edge by its ID.
@@ -234,7 +380,16 @@ class Neo4jRepository:
         Returns:
             ASTEdge if found, None otherwise
         """
-        raise NotImplementedError("Subclasses must implement get_edge")
+        query = """
+MATCH (a)-[r {id: $edge_id}]->(b)
+RETURN r, a.id as from_id, b.id as to_id
+"""
+        with self.driver.session() as session:
+            result = session.run(query, edge_id=edge_id)
+            record = result.single()
+            if record is None:
+                return None
+            return self._record_to_edge(record["r"], record["from_id"], record["to_id"])
 
     def get_edges_by_ids(
         self,
@@ -250,7 +405,20 @@ class Neo4jRepository:
         Returns:
             List of ASTEdge objects
         """
-        raise NotImplementedError("Subclasses must implement get_edges_by_ids")
+        if not edge_ids:
+            return []
+
+        query = """
+MATCH (a)-[r]->(b)
+WHERE r.id IN $edge_ids
+RETURN r, a.id as from_id, b.id as to_id
+"""
+        with self.driver.session() as session:
+            result = session.run(query, edge_ids=edge_ids)
+            return [
+                self._record_to_edge(record["r"], record["from_id"], record["to_id"])
+                for record in result
+            ]
 
     def get_edges_between(
         self,
@@ -268,7 +436,16 @@ class Neo4jRepository:
         Returns:
             List of edges connecting the two nodes
         """
-        raise NotImplementedError("Subclasses must implement get_edges_between")
+        query = """
+MATCH (a {id: $from_id})-[r]->(b {id: $to_id})
+RETURN r, a.id as from_id, b.id as to_id
+"""
+        with self.driver.session() as session:
+            result = session.run(query, from_id=from_node_id, to_id=to_node_id)
+            return [
+                self._record_to_edge(record["r"], record["from_id"], record["to_id"])
+                for record in result
+            ]
 
     def get_outgoing_edges(
         self,
@@ -286,7 +463,18 @@ class Neo4jRepository:
         Returns:
             List of outgoing edges
         """
-        raise NotImplementedError("Subclasses must implement get_outgoing_edges")
+        limit_clause = f"LIMIT {limit}" if limit else ""
+        query = f"""
+MATCH (a {{id: $node_id}})-[r]->(b)
+RETURN r, a.id as from_id, b.id as to_id
+{limit_clause}
+"""
+        with self.driver.session() as session:
+            result = session.run(query, node_id=node_id)
+            return [
+                self._record_to_edge(record["r"], record["from_id"], record["to_id"])
+                for record in result
+            ]
 
     def get_incoming_edges(
         self,
@@ -304,7 +492,18 @@ class Neo4jRepository:
         Returns:
             List of incoming edges
         """
-        raise NotImplementedError("Subclasses must implement get_incoming_edges")
+        limit_clause = f"LIMIT {limit}" if limit else ""
+        query = f"""
+MATCH (a)-[r]->(b {{id: $node_id}})
+RETURN r, a.id as from_id, b.id as to_id
+{limit_clause}
+"""
+        with self.driver.session() as session:
+            result = session.run(query, node_id=node_id)
+            return [
+                self._record_to_edge(record["r"], record["from_id"], record["to_id"])
+                for record in result
+            ]
 
     def update_edge(
         self,
@@ -322,7 +521,17 @@ class Neo4jRepository:
         Returns:
             Updated ASTEdge if found, None otherwise
         """
-        raise NotImplementedError("Subclasses must implement update_edge")
+        query = """
+MATCH (a)-[r {id: $edge_id}]->(b)
+SET r += $properties
+RETURN r, a.id as from_id, b.id as to_id
+"""
+        with self.driver.session() as session:
+            result = session.run(query, edge_id=edge_id, properties=properties)
+            record = result.single()
+            if record is None:
+                return None
+            return self._record_to_edge(record["r"], record["from_id"], record["to_id"])
 
     def delete_edge(self, edge_id: str, edge_type: Optional[str] = None) -> bool:
         """Delete a single edge by its ID.
@@ -334,7 +543,15 @@ class Neo4jRepository:
         Returns:
             True if edge was deleted, False if not found
         """
-        raise NotImplementedError("Subclasses must implement delete_edge")
+        query = """
+MATCH ()-[r {id: $edge_id}]->()
+DELETE r
+RETURN count(r) as deleted
+"""
+        with self.driver.session() as session:
+            result = session.run(query, edge_id=edge_id)
+            record = result.single()
+            return record["deleted"] > 0
 
     def delete_edges(self, edge_ids: list[str], edge_type: Optional[str] = None) -> int:
         """Batch delete multiple edges by their IDs.
@@ -346,7 +563,19 @@ class Neo4jRepository:
         Returns:
             Number of edges actually deleted
         """
-        raise NotImplementedError("Subclasses must implement delete_edges")
+        if not edge_ids:
+            return 0
+
+        query = """
+MATCH ()-[r]->()
+WHERE r.id IN $edge_ids
+DELETE r
+RETURN count(r) as deleted
+"""
+        with self.driver.session() as session:
+            result = session.run(query, edge_ids=edge_ids)
+            record = result.single()
+            return record["deleted"]
 
     def edge_exists(self, edge_id: str, edge_type: Optional[str] = None) -> bool:
         """Check if an edge exists by its ID.
@@ -358,7 +587,14 @@ class Neo4jRepository:
         Returns:
             True if edge exists, False otherwise
         """
-        raise NotImplementedError("Subclasses must implement edge_exists")
+        query = """
+MATCH ()-[r {id: $edge_id}]->()
+RETURN count(r) > 0 as exists
+"""
+        with self.driver.session() as session:
+            result = session.run(query, edge_id=edge_id)
+            record = result.single()
+            return record["exists"]
 
     # ------------------------------------------------------------------
     # Query Execution
@@ -387,7 +623,11 @@ class Neo4jRepository:
                 {"name": "process_data"}
             )
         """
-        raise NotImplementedError("Subclasses must implement execute_query")
+        with self.driver.session() as session:
+            if read_only:
+                return session.run(query, parameters or {})
+            else:
+                return session.write_transaction(lambda tx: tx.run(query, parameters or {}))
 
     def execute_write(
         self,
@@ -403,7 +643,7 @@ class Neo4jRepository:
         Returns:
             Neo4j Result object
         """
-        raise NotImplementedError("Subclasses must implement execute_write")
+        return self.execute_query(query, parameters, read_only=False)
 
     def execute_read(
         self,
@@ -419,7 +659,7 @@ class Neo4jRepository:
         Returns:
             Neo4j Result object
         """
-        raise NotImplementedError("Subclasses must implement execute_read")
+        return self.execute_query(query, parameters, read_only=True)
 
     def execute_in_transaction(
         self,
@@ -443,7 +683,14 @@ class Neo4jRepository:
             ]
             results = repo.execute_in_transaction(queries)
         """
-        raise NotImplementedError("Subclasses must implement execute_in_transaction")
+        results: list[Result] = []
+        with self.driver.session() as session:
+            with session.begin_transaction() as tx:
+                for query, params in queries:
+                    result = tx.run(query, params or {})
+                    results.append(result)
+                tx.commit()
+        return results
 
     def count_nodes(self, label: Optional[str] = None) -> int:
         """Count nodes in the graph, optionally filtered by label.
@@ -454,7 +701,15 @@ class Neo4jRepository:
         Returns:
             Number of matching nodes
         """
-        raise NotImplementedError("Subclasses must implement count_nodes")
+        label_clause = f":{label}" if label else ""
+        query = f"""
+MATCH (n{label_clause})
+RETURN count(n) as count
+"""
+        with self.driver.session() as session:
+            result = session.run(query)
+            record = result.single()
+            return record["count"]
 
     def count_edges(self, edge_type: Optional[str] = None) -> int:
         """Count edges in the graph, optionally filtered by type.
@@ -465,7 +720,14 @@ class Neo4jRepository:
         Returns:
             Number of matching edges
         """
-        raise NotImplementedError("Subclasses must implement count_edges")
+        query = """
+MATCH ()-[r]->()
+RETURN count(r) as count
+"""
+        with self.driver.session() as session:
+            result = session.run(query)
+            record = result.single()
+            return record["count"]
 
     # ------------------------------------------------------------------
     # Schema Management
@@ -486,7 +748,16 @@ class Neo4jRepository:
             index_name: Optional custom index name
             if_not_exists: If True, skip if index already exists
         """
-        raise NotImplementedError("Subclasses must implement create_index")
+        name = index_name or f"idx_{label}_{property_name}"
+        if_not_exists_clause = "IF NOT EXISTS" if if_not_exists else ""
+        query = f"""
+CREATE INDEX {name} {if_not_exists_clause}
+FOR (n:{label})
+ON (n.{property_name})
+"""
+        with self.driver.session() as session:
+            session.run(query)
+        logger.info("Created index %s on %s.%s", name, label, property_name)
 
     def create_fulltext_index(
         self,
@@ -503,7 +774,23 @@ class Neo4jRepository:
             properties: List of properties to include in index
             if_not_exists: If True, skip if index already exists
         """
-        raise NotImplementedError("Subclasses must implement create_fulltext_index")
+        if_not_exists_clause = "IF NOT EXISTS" if if_not_exists else ""
+        labels_str = ", ".join([f"`{l}`" for l in labels])
+        props_str = ", ".join([f"n.{p}" for p in properties])
+        query = f"""
+CREATE FULLTEXT INDEX {index_name} {if_not_exists_clause}
+FOR (n)
+ON EACH [{props_str}]
+OPTIONS {{
+  indexConfig: {{
+    `fulltext.analyzer`: 'standard',
+    `fulltext.eventually_consistent`: true
+  }}
+}}
+"""
+        with self.driver.session() as session:
+            session.run(query)
+        logger.info("Created full-text index %s for labels %s", index_name, labels)
 
     def create_constraint(
         self,
@@ -522,7 +809,26 @@ class Neo4jRepository:
             constraint_type: Type of constraint ("UNIQUE", "NOT_NULL", etc.)
             if_not_exists: If True, skip if constraint already exists
         """
-        raise NotImplementedError("Subclasses must implement create_constraint")
+        if_not_exists_clause = "IF NOT EXISTS" if if_not_exists else ""
+
+        if constraint_type.upper() == "UNIQUE":
+            query = f"""
+CREATE CONSTRAINT {constraint_name} {if_not_exists_clause}
+FOR (n:{label})
+REQUIRE n.{property_name} IS UNIQUE
+"""
+        elif constraint_type.upper() == "NOT_NULL":
+            query = f"""
+CREATE CONSTRAINT {constraint_name} {if_not_exists_clause}
+FOR (n:{label})
+REQUIRE n.{property_name} IS NOT NULL
+"""
+        else:
+            raise ValueError(f"Unsupported constraint type: {constraint_type}")
+
+        with self.driver.session() as session:
+            session.run(query)
+        logger.info("Created constraint %s on %s.%s", constraint_name, label, property_name)
 
     def drop_index(self, index_name: str, if_exists: bool = True) -> None:
         """Drop an index by name.
@@ -531,7 +837,11 @@ class Neo4jRepository:
             index_name: Name of the index to drop
             if_exists: If True, skip if index doesn't exist
         """
-        raise NotImplementedError("Subclasses must implement drop_index")
+        if_exists_clause = "IF EXISTS" if if_exists else ""
+        query = f"DROP INDEX {index_name} {if_exists_clause}"
+        with self.driver.session() as session:
+            session.run(query)
+        logger.info("Dropped index %s", index_name)
 
     def drop_constraint(self, constraint_name: str, if_exists: bool = True) -> None:
         """Drop a constraint by name.
@@ -540,7 +850,11 @@ class Neo4jRepository:
             constraint_name: Name of the constraint to drop
             if_exists: If True, skip if constraint doesn't exist
         """
-        raise NotImplementedError("Subclasses must implement drop_constraint")
+        if_exists_clause = "IF EXISTS" if if_exists else ""
+        query = f"DROP CONSTRAINT {constraint_name} {if_exists_clause}"
+        with self.driver.session() as session:
+            session.run(query)
+        logger.info("Dropped constraint %s", constraint_name)
 
     def list_indexes(self) -> list[dict[str, Any]]:
         """List all indexes in the database.
@@ -548,7 +862,10 @@ class Neo4jRepository:
         Returns:
             List of index metadata dictionaries
         """
-        raise NotImplementedError("Subclasses must implement list_indexes")
+        query = "SHOW INDEXES"
+        with self.driver.session() as session:
+            result = session.run(query)
+            return [dict(record) for record in result]
 
     def list_constraints(self) -> list[dict[str, Any]]:
         """List all constraints in the database.
@@ -556,7 +873,10 @@ class Neo4jRepository:
         Returns:
             List of constraint metadata dictionaries
         """
-        raise NotImplementedError("Subclasses must implement list_constraints")
+        query = "SHOW CONSTRAINTS"
+        with self.driver.session() as session:
+            result = session.run(query)
+            return [dict(record) for record in result]
 
     def get_schema_info(self) -> dict[str, Any]:
         """Get database schema information.
@@ -565,7 +885,21 @@ class Neo4jRepository:
             Dictionary with schema metadata including labels,
             relationship types, and property keys
         """
-        raise NotImplementedError("Subclasses must implement get_schema_info")
+        with self.driver.session() as session:
+            labels_result = session.run("CALL db.labels()")
+            labels = [record["label"] for record in labels_result]
+
+            rel_types_result = session.run("CALL db.relationshipTypes()")
+            rel_types = [record["relationshipType"] for record in rel_types_result]
+
+            prop_keys_result = session.run("CALL db.propertyKeys()")
+            prop_keys = [record["propertyKey"] for record in prop_keys_result]
+
+        return {
+            "labels": labels,
+            "relationship_types": rel_types,
+            "property_keys": prop_keys,
+        }
 
     def apply_cql_file(self, file_path: str) -> list[Result]:
         """Apply Cypher statements from a file.
@@ -579,7 +913,23 @@ class Neo4jRepository:
         Returns:
             List of Result objects for each statement
         """
-        raise NotImplementedError("Subclasses must implement apply_cql_file")
+        with open(file_path, "r") as f:
+            content = f.read()
+
+        # Split by semicolons and filter out empty statements
+        statements = [s.strip() for s in content.split(";") if s.strip()]
+
+        results: list[Result] = []
+        with self.driver.session() as session:
+            for statement in statements:
+                try:
+                    result = session.run(statement)
+                    results.append(result)
+                except Exception as exc:
+                    logger.warning("Failed to execute statement: %s", exc)
+                    raise
+
+        return results
 
     # ------------------------------------------------------------------
     # Context Manager Support
@@ -592,3 +942,75 @@ class Neo4jRepository:
     def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
         """Exit context manager and close connection."""
         self.close()
+
+    # ------------------------------------------------------------------
+    # Helper Methods
+    # ------------------------------------------------------------------
+
+    def _record_to_node(self, record: Any) -> ASTNode:
+        """Convert a Neo4j node record to ASTNode."""
+        from ast_rag.dto import NodeKind, Language
+
+        props = dict(record)
+        return ASTNode(
+            id=props.get("id", ""),
+            kind=NodeKind(props.get("kind", "Function")),
+            name=props.get("name", ""),
+            qualified_name=props.get("qualified_name", ""),
+            lang=Language(props.get("lang", "java")),
+            file_path=props.get("file_path", ""),
+            start_line=props.get("start_line", 0),
+            end_line=props.get("end_line", 0),
+            start_byte=props.get("start_byte", 0),
+            end_byte=props.get("end_byte", 0),
+            signature=props.get("signature"),
+            docstring=props.get("docstring"),
+            valid_from=props.get("valid_from", "INIT"),
+            valid_to=props.get("valid_to"),
+        )
+
+    def _node_to_props(self, node: ASTNode) -> dict[str, Any]:
+        """Convert ASTNode to Neo4j properties dictionary."""
+        return {
+            "id": node.id,
+            "kind": node.kind.value,
+            "name": node.name,
+            "qualified_name": node.qualified_name,
+            "lang": node.lang.value,
+            "file_path": node.file_path,
+            "start_line": node.start_line,
+            "end_line": node.end_line,
+            "start_byte": node.start_byte,
+            "end_byte": node.end_byte,
+            "signature": node.signature,
+            "docstring": node.docstring,
+            "valid_from": node.valid_from,
+            "valid_to": node.valid_to,
+        }
+
+    def _record_to_edge(self, record: Any, from_id: str, to_id: str) -> ASTEdge:
+        """Convert a Neo4j edge record to ASTEdge."""
+        from ast_rag.dto import EdgeKind
+
+        props = dict(record)
+        return ASTEdge(
+            id=props.get("id", ""),
+            kind=EdgeKind(props.get("kind", "CALLS")),
+            from_id=from_id,
+            to_id=to_id,
+            label=props.get("label"),
+            valid_from=props.get("valid_from", "INIT"),
+            valid_to=props.get("valid_to"),
+        )
+
+    def _edge_to_props(self, edge: ASTEdge) -> dict[str, Any]:
+        """Convert ASTEdge to Neo4j properties dictionary."""
+        return {
+            "id": edge.id,
+            "kind": edge.kind.value,
+            "from_id": edge.from_id,
+            "to_id": edge.to_id,
+            "label": edge.label,
+            "valid_from": edge.valid_from,
+            "valid_to": edge.valid_to,
+        }

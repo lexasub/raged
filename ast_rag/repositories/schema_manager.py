@@ -915,3 +915,28 @@ class SchemaManager:
         """Exit context manager."""
         # SchemaManager doesn't own the driver, so we don't close it
         pass
+
+
+# ---------------------------------------------------------------------------
+# Module-level convenience functions
+# ---------------------------------------------------------------------------
+
+
+def apply_schema(driver: Driver) -> None:
+    """Apply the AST-RAG schema to a Neo4j database.
+
+    This is a convenience function that creates a SchemaManager and applies
+    the standard schema (indexes and constraints).
+
+    Args:
+        driver: Neo4j driver instance
+
+    Example::
+
+        from ast_rag.repositories import create_driver, apply_schema
+        driver = create_driver(config.neo4j)
+        apply_schema(driver)
+    """
+    manager = SchemaManager(driver)
+    manager.create_standard_indexes()
+    manager.create_standard_constraints()

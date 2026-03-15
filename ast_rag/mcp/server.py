@@ -38,7 +38,7 @@ from ast_rag.services.graph_updater_service import (
     compute_diff_for_commits,
 )
 from ast_rag.services.embedding_manager import EmbeddingManager
-from ast_rag.services.api import ASTRagAPI
+from ast_rag.api import ASTRagAPI
 from ast_rag.services.parsing.parser_manager import ParserManager, walk_source_files
 from ast_rag.services.summarizer_service import SummarizerService
 
@@ -275,7 +275,9 @@ def update_project_dry_run(
     from ast_rag.services.graph_updater_service import compute_diff_for_commits
 
     result = compute_diff_for_commits(
-        path, from_commit, to_commit,
+        path,
+        from_commit,
+        to_commit,
         dry_run=True,
         max_changed_nodes=max_changed_nodes,
     )
@@ -807,6 +809,7 @@ def get_call_confidence(
     result = api.get_call_confidence(from_name, to_name)
     return result
 
+
 @mcp.tool()
 def analyze_stacktrace(
     stacktrace: str,
@@ -893,7 +896,9 @@ def analyze_stacktrace(
                 "likely_cause": report.root_cause.likely_cause if report.root_cause else None,
                 "suggested_fix": report.root_cause.suggested_fix if report.root_cause else None,
                 "confidence": report.root_cause.confidence if report.root_cause else None,
-            } if report.root_cause else None,
+            }
+            if report.root_cause
+            else None,
             "call_chain": [
                 {
                     "frame_index": frame.frame_index,
@@ -913,7 +918,9 @@ def analyze_stacktrace(
                     "commit": issue.commit_hash,
                 }
                 for issue in report.similar_issues
-            ] if report.similar_issues else [],
+            ]
+            if report.similar_issues
+            else [],
             "total_frames": report.total_frames,
             "mapped_frames": report.mapped_frames,
         }
