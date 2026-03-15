@@ -22,7 +22,7 @@ from collections import defaultdict
 from tree_sitter import Tree, QueryCursor, Node
 
 from ast_rag.models import ASTBlock, BlockType, Language, ASTNode
-from ast_rag.services.parsing.language_queries import LANGUAGE_QUERIES
+from ast_rag.services.parsing import LANGUAGE_QUERIES
 
 logger = logging.getLogger(__name__)
 
@@ -105,6 +105,7 @@ class BlockExtractor:
             if qstr:
                 try:
                     from tree_sitter import Language, Query
+
                     # We need the language object - extract from context
                     # For now, we'll compile queries on-demand
                     compiled_queries[qname] = qstr
@@ -149,6 +150,7 @@ class BlockExtractor:
 
             try:
                 from tree_sitter import Language, Query, Parser
+
                 # Get the language
                 lang_map = {
                     "python": "python",
@@ -212,8 +214,7 @@ class BlockExtractor:
         # Recursively traverse the tree
         def traverse(node: Node, depth: int = 1) -> None:
             # Check if this node is within the function's range
-            if (node.start_byte < func_node.start_byte or
-                node.end_byte > func_node.end_byte):
+            if node.start_byte < func_node.start_byte or node.end_byte > func_node.end_byte:
                 return
 
             # Check if this node type matches a block type
@@ -388,7 +389,7 @@ def _node_text(node: Optional[Node], source: bytes) -> str:
     if node is None:
         return ""
     try:
-        return source[node.start_byte:node.end_byte].decode("utf-8", errors="replace")
+        return source[node.start_byte : node.end_byte].decode("utf-8", errors="replace")
     except Exception:
         return ""
 

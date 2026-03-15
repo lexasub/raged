@@ -33,7 +33,7 @@ from ast_rag.models import (
     EdgeKind,
     Language as Lang,
 )
-from ast_rag.services.parsing.language_queries import LANGUAGE_QUERIES
+from ast_rag.services.parsing import LANGUAGE_QUERIES
 from ast_rag.utils.parse_cache import ParseCache, SQLiteParseCache
 
 logger = logging.getLogger(__name__)
@@ -148,9 +148,7 @@ class ParserManager:
                 try:
                     compiled[qname] = Query(lang, qstr)
                 except Exception as exc:
-                    logger.warning(
-                        "Failed to compile query '%s' for '%s': %s", qname, name, exc
-                    )
+                    logger.warning("Failed to compile query '%s' for '%s': %s", qname, name, exc)
             self._compiled_queries[name] = compiled
 
     def detect_language(self, file_path: str) -> Optional[str]:
@@ -222,11 +220,7 @@ class ParserManager:
 
         # Parse (full or incremental).
         parser = self._parsers[lang]
-        tree = (
-            parser.parse(source, old_tree)
-            if old_tree is not None
-            else parser.parse(source)
-        )
+        tree = parser.parse(source, old_tree) if old_tree is not None else parser.parse(source)
 
         # Persist result in cache.
         self._cache.put(abs_path, source, tree)
@@ -478,9 +472,7 @@ class ParserManager:
             if query is None:
                 continue
             for _, md in QueryCursor(query).matches(tree.root_node):
-                path_ts = (
-                    md.get("import_path") or md.get("path") or md.get("module_path")
-                )
+                path_ts = md.get("import_path") or md.get("path") or md.get("module_path")
                 if path_ts is None:
                     continue
                 if isinstance(path_ts, list):
@@ -489,9 +481,7 @@ class ParserManager:
                 if not path_text:
                     continue
                 # target id is synthetic: we use a stable hash for the import target
-                target_id = hashlib.sha256(f"import:{path_text}".encode()).hexdigest()[
-                    :24
-                ]
+                target_id = hashlib.sha256(f"import:{path_text}".encode()).hexdigest()[:24]
                 edges.append(
                     ASTEdge(
                         kind=edge_kind,
@@ -567,9 +557,7 @@ class ParserManager:
 
         # --- DI injection edges (Java-specific) ---
         if lang == "java":
-            injects_edges = self._extract_injects(
-                tree, nodes, file_path, lang, source, commit_hash
-            )
+            injects_edges = self._extract_injects(tree, nodes, file_path, lang, source, commit_hash)
             edges.extend(injects_edges)
 
         # --- New edge types ---
@@ -580,9 +568,7 @@ class ParserManager:
         edges.extend(depends_on_edges)
 
         # OVERRIDES edges (Java @Override, C++ override keyword)
-        overrides_edges = self._extract_overrides(
-            tree, nodes, lang, source, commit_hash
-        )
+        overrides_edges = self._extract_overrides(tree, nodes, lang, source, commit_hash)
         edges.extend(overrides_edges)
 
         # TYPES edges (type annotations)
@@ -591,9 +577,7 @@ class ParserManager:
 
         # --- Rust-specific edges ---
         if lang == "rust":
-            rust_edges = self._extract_rust_edges(
-                tree, nodes, file_path, source, commit_hash
-            )
+            rust_edges = self._extract_rust_edges(tree, nodes, file_path, source, commit_hash)
             edges.extend(rust_edges)
 
         return edges
@@ -648,8 +632,10 @@ class ParserManager:
 
         # Filter to only function/method nodes
         function_nodes = [
-            n for n in nodes
-            if n.kind in (NodeKind.FUNCTION, NodeKind.METHOD, NodeKind.CONSTRUCTOR, NodeKind.DESTRUCTOR)
+            n
+            for n in nodes
+            if n.kind
+            in (NodeKind.FUNCTION, NodeKind.METHOD, NodeKind.CONSTRUCTOR, NodeKind.DESTRUCTOR)
         ]
 
         if not function_nodes:
@@ -657,6 +643,7 @@ class ParserManager:
 
         # Use BlockExtractor
         from ast_rag.services.parsing.block_extractor import BlockExtractor
+
         extractor = BlockExtractor()
         blocks = extractor.extract_blocks(tree, source, function_nodes, lang, commit_hash)
 
@@ -674,7 +661,10 @@ class ParserManager:
 
         logger.debug(
             "Extracted %d blocks and %d CONTAINS_BLOCK edges from %s (%s)",
-            len(blocks), len(edges), file_path, lang
+            len(blocks),
+            len(edges),
+            file_path,
+            lang,
         )
 
         return blocks, edges
@@ -745,9 +735,7 @@ class ParserManager:
         - Interface method calls
         """
         # Check if receiver is a pointer or reference to a base class
-        receiver_type = self._infer_cpp_receiver_type(
-            receiver_node, None, name_to_id, source
-        )
+        receiver_type = self._infer_cpp_receiver_type(receiver_node, None, name_to_id, source)
         if not receiver_type or not receiver_type.startswith("var:"):
             return None
 
@@ -787,9 +775,7 @@ class ParserManager:
         - Polymorphic method calls
         """
         # Check if receiver is an interface or abstract class
-        receiver_type = self._infer_java_receiver_type(
-            receiver_node, None, name_to_id, source
-        )
+        receiver_type = self._infer_java_receiver_type(receiver_node, None, name_to_id, source)
         if not receiver_type or receiver_type not in ("this", "super"):
             return None
 
@@ -856,9 +842,7 @@ class ParserManager:
                         continue
 
                     # Create target ID for the include file
-                    target_id = hashlib.sha256(
-                        f"include:{path_text}".encode()
-                    ).hexdigest()[:24]
+                    target_id = hashlib.sha256(f"include:{path_text}".encode()).hexdigest()[:24]
 
                     edges.append(
                         ASTEdge(
@@ -885,9 +869,7 @@ class ParserManager:
                         continue
 
                     # Create target ID for the imported module
-                    target_id = hashlib.sha256(
-                        f"import:{import_text}".encode()
-                    ).hexdigest()[:24]
+                    target_id = hashlib.sha256(f"import:{import_text}".encode()).hexdigest()[:24]
 
                     edges.append(
                         ASTEdge(
@@ -939,11 +921,7 @@ class ParserManager:
 
                     # Find the overriding method node
                     overriding_node = next(
-                        (
-                            n
-                            for n in nodes
-                            if n.name == method_name and n.kind == NodeKind.METHOD
-                        ),
+                        (n for n in nodes if n.name == method_name and n.kind == NodeKind.METHOD),
                         None,
                     )
                     if not overriding_node:
@@ -1009,20 +987,14 @@ class ParserManager:
 
                     # Find the field node
                     field_node = next(
-                        (
-                            n
-                            for n in nodes
-                            if n.name == field_name and n.kind == NodeKind.FIELD
-                        ),
+                        (n for n in nodes if n.name == field_name and n.kind == NodeKind.FIELD),
                         None,
                     )
                     if not field_node:
                         continue
 
                     # Create target ID for the type
-                    type_id = hashlib.sha256(f"type:{field_type}".encode()).hexdigest()[
-                        :24
-                    ]
+                    type_id = hashlib.sha256(f"type:{field_type}".encode()).hexdigest()[:24]
 
                     edges.append(
                         ASTEdge(
@@ -1113,11 +1085,7 @@ class ParserManager:
 
                 # Find the constructor node and injected type node
                 ctor_node = next(
-                    (
-                        n
-                        for n in nodes
-                        if n.name == ctor_name and n.kind == NodeKind.CONSTRUCTOR
-                    ),
+                    (n for n in nodes if n.name == ctor_name and n.kind == NodeKind.CONSTRUCTOR),
                     None,
                 )
                 type_node = nodes_by_name.get(type_name)
@@ -1212,13 +1180,9 @@ class ParserManager:
 
                 # Extract trait bounds from predicates
                 # Pattern: where T: Trait + Lifetime
-                bounds_query = self._compiled_queries.get("rust", {}).get(
-                    "trait_bounds"
-                )
+                bounds_query = self._compiled_queries.get("rust", {}).get("trait_bounds")
                 if bounds_query:
-                    for _, bound_match in QueryCursor(bounds_query).matches(
-                        predicates_ts
-                    ):
+                    for _, bound_match in QueryCursor(bounds_query).matches(predicates_ts):
                         trait_ts = bound_match.get("trait_name")
                         if trait_ts:
                             if isinstance(trait_ts, list):
@@ -1348,9 +1312,7 @@ class ParserManager:
         """
         if lang == "cpp":
             # Check for fully qualified names or external includes
-            return "::" in symbol_name or self._is_external_include(
-                symbol_name, current_file
-            )
+            return "::" in symbol_name or self._is_external_include(symbol_name, current_file)
         elif lang == "java":
             # Check for fully qualified class names
             return "." in symbol_name and not symbol_name.startswith("java.")
@@ -1480,13 +1442,9 @@ class ParserManager:
 
         # Handle different receiver patterns
         if lang == "java":
-            return self._infer_java_receiver_type(
-                receiver_node, tree, name_to_id, source
-            )
+            return self._infer_java_receiver_type(receiver_node, tree, name_to_id, source)
         elif lang == "cpp":
-            return self._infer_cpp_receiver_type(
-                receiver_node, tree, name_to_id, source
-            )
+            return self._infer_cpp_receiver_type(receiver_node, tree, name_to_id, source)
         return None
 
     def _infer_java_receiver_type(
@@ -1748,9 +1706,9 @@ class ParserManager:
             The best matching candidate name, or None if no clear match
         """
         # Get argument list from call expression
-        args_node = call_node.child_by_field_name(
-            "arguments"
-        ) or call_node.child_by_field_name("parameter_list")
+        args_node = call_node.child_by_field_name("arguments") or call_node.child_by_field_name(
+            "parameter_list"
+        )
         if not args_node:
             return None
 
@@ -1770,11 +1728,7 @@ class ParserManager:
 
 def _node_text(node: Node, source: bytes) -> str:
     """Extract the UTF-8 text for a tree-sitter node."""
-    return (
-        source[node.start_byte : node.end_byte]
-        .decode("utf-8", errors="replace")
-        .strip()
-    )
+    return source[node.start_byte : node.end_byte].decode("utf-8", errors="replace").strip()
 
 
 def _build_qualified_name(file_path: str, name: str, lang: str) -> str:
@@ -1793,9 +1747,7 @@ def _containment_edge_kind(kind: NodeKind) -> EdgeKind:
     return EdgeKind.CONTAINS_CLASS
 
 
-def _find_enclosing_type(
-    target: ASTNode, type_nodes: list[ASTNode]
-) -> Optional[ASTNode]:
+def _find_enclosing_type(target: ASTNode, type_nodes: list[ASTNode]) -> Optional[ASTNode]:
     """Find the innermost type node whose byte range fully contains target."""
     best: Optional[ASTNode] = None
     best_size = float("inf")
@@ -1807,9 +1759,7 @@ def _find_enclosing_type(
     return best
 
 
-def _find_enclosing_callable(
-    call_line: int, callables: list[ASTNode]
-) -> Optional[ASTNode]:
+def _find_enclosing_callable(call_line: int, callables: list[ASTNode]) -> Optional[ASTNode]:
     """Find the innermost callable (method/function) containing the given line."""
     best: Optional[ASTNode] = None
     best_size = float("inf")
@@ -1918,9 +1868,7 @@ def walk_source_files(
     result: list[tuple[str, str]] = []
     for dirpath, dirnames, filenames in os.walk(root):
         # Prune excluded directories in-place
-        dirnames[:] = [
-            d for d in dirnames if d not in exclude_dirs and not d.startswith(".")
-        ]
+        dirnames[:] = [d for d in dirnames if d not in exclude_dirs and not d.startswith(".")]
         for fname in filenames:
             ext = Path(fname).suffix.lower()
             lang = EXT_TO_LANG.get(ext)
