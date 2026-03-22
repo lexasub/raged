@@ -1,5 +1,7 @@
 # AST-RAG — Code Analysis & Navigation System
 
+[![gitcgr](https://gitcgr.com/badge/lexasub/raged.svg)](https://gitcgr.com/lexasub/raged)
+
 Context-aware code intelligence system for AI agents and developers. Provides semantic code search, definition lookup, call graph analysis, and codebase navigation powered by AST parsing (Tree-sitter), graph database (Neo4j), and vector embeddings (Qdrant).
 
 **AST-RAG** parses code into AST (via Tree-sitter), builds a graph in **Neo4j**, and indexes semantic embeddings in **Qdrant** (bge-m3).
