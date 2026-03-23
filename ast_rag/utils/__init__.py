@@ -5,6 +5,7 @@ Common utilities and helpers:
 - output: Output formatters (JSON, Rich tables)
 - file_cache: File content caching
 - parse_cache: Parse tree caching
+- bounded_ast_cache: Bounded LRU cache with memory limits
 """
 
 from ast_rag.utils.metrics import (
@@ -20,6 +21,7 @@ from ast_rag.utils.metrics import (
 from ast_rag.utils.output import OutputFormatter, get_formatter
 from ast_rag.utils.file_cache import FileCache
 from ast_rag.utils.parse_cache import ParseCache, SQLiteParseCache
+from ast_rag.utils.bounded_ast_cache import BoundedASTCache, BoundedParseCache
 
 __all__ = [
     # Metrics
@@ -38,4 +40,6 @@ __all__ = [
     "FileCache",
     "ParseCache",
     "SQLiteParseCache",
+    "BoundedASTCache",
+    "BoundedParseCache",
 ]

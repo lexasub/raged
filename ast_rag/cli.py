@@ -99,6 +99,12 @@ def init(
     path: str = typer.Argument(..., help="Root directory of the codebase to index"),
     config: Optional[str] = typer.Option(None, "--config", "-c", help="Path to config JSON"),
     commit: str = typer.Option("INIT", "--commit", help="Commit hash label for this index"),
+    cache_entries: Optional[int] = typer.Option(
+        None, "--cache-entries", help="Max parse cache entries (overrides config)"
+    ),
+    cache_memory_mb: Optional[int] = typer.Option(
+        None, "--cache-memory-mb", help="Max parse cache memory in MB (overrides config)"
+    ),
     verbose: bool = typer.Option(False, "--verbose", "-v"),
 ) -> None:
     """Perform a full initial indexing of the codebase at PATH."""
@@ -118,7 +124,15 @@ def init(
         apply_schema(driver)
 
     # 2. Parse all source files
-    pm = ParserManager(project_id=cfg.neo4j.project_id)
+    pc_cfg = cfg.parse_cache.model_dump()
+    if cache_entries is not None:
+        pc_cfg["max_entries"] = cache_entries
+    if cache_memory_mb is not None:
+        pc_cfg["max_size_mb"] = cache_memory_mb
+    pm = ParserManager(
+        project_id=cfg.neo4j.project_id,
+        config={"parse_cache": pc_cfg},
+    )
     files = walk_source_files(root, exclude_dirs=cfg.exclude_patterns)
     console.print(f"Found [bold]{len(files)}[/bold] source files.")
 
@@ -1724,6 +1738,62 @@ def analyze_stacktrace(
 
             console.print(traceback.format_exc())
         raise typer.Exit(1)
+
+
+# ---------------------------------------------------------------------------
+# cache-stats command
+# ---------------------------------------------------------------------------
+
+
+@app.command("cache-stats")
+def cache_stats(
+    config: Optional[str] = typer.Option(None, "--config", "-c", help="Path to config JSON"),
+    verbose: bool = typer.Option(False, "--verbose", "-v"),
+) -> None:
+    """
+    Show parse cache statistics and configuration.
+
+    Useful for debugging memory usage and cache efficiency.
+
+    Examples:
+
+      ast-rag cache-stats
+      ast-rag cache-stats --config ast_rag_config.json
+    """
+    if verbose:
+        logging.basicConfig(level=logging.DEBUG)
+    else:
+        logging.basicConfig(level=logging.WARNING)
+
+    cfg = _load_config(config)
+
+    console.rule("[bold blue]AST-RAG Cache Configuration[/bold blue]")
+    console.print(
+        f"  Backend: {'SQLite (persistent)' if cfg.parse_cache.persistence_enabled else 'In-memory (bounded)'}"
+    )
+    console.print(f"  Max entries: {cfg.parse_cache.max_entries:,}")
+    console.print(f"  Max memory: {cfg.parse_cache.max_size_mb} MB")
+    if cfg.parse_cache.persistence_enabled:
+        console.print(f"  DB path: {cfg.parse_cache.db_path}")
+
+    # Create a parser manager to show live stats (only useful in long-running scenarios)
+    pm = ParserManager(
+        project_id=cfg.neo4j.project_id,
+        config={"parse_cache": cfg.parse_cache.model_dump()},
+    )
+    stats = pm.tree_cache_stats()
+
+    console.print()
+    console.print("[bold]Live Cache Stats:[/bold]")
+    console.print(f"  Entries: {stats.get('size', 0)}")
+    console.print(f"  Hits:    {stats.get('hits', 0)}")
+    console.print(f"  Misses:  {stats.get('misses', 0)}")
+    console.print(f"  Hit rate: {stats.get('hit_rate', 0.0):.1%}")
+    if "memory_mb" in stats:
+        console.print(
+            f"  Memory:  {stats['memory_mb']:.2f} MB / {stats.get('max_memory_mb', '?')} MB"
+        )
+    console.rule("[bold green]Done[/bold green]")
 
 
 if __name__ == "__main__":

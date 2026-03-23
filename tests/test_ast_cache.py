@@ -1,6 +1,6 @@
 """
-test_ast_cache.py - Tests for ParseCache, LazyTree, SQLiteParseCache, and
-ParserManager cache integration.
+test_ast_cache.py - Tests for ParseCache, LazyTree, SQLiteParseCache,
+BoundedASTCache, BoundedParseCache, and ParserManager cache integration.
 
 Structure
 ---------
@@ -10,6 +10,8 @@ TestSQLiteParseCache         - SQLiteParseCache persistence and interface parity
 TestParserManagerIntegration - ParserManager delegating to ParseCache (in-memory)
 TestParserManagerSQLite      - ParserManager delegating to SQLiteParseCache
 TestWorkerResolve            - parse_file(resolve=True) returns a plain Tree
+TestBoundedASTCache          - BoundedASTCache unit tests (entry+memory limits)
+TestBoundedParseCache        - BoundedParseCache adapter + ParserManager integration
 """
 
 from __future__ import annotations
@@ -25,6 +27,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from ast_rag.utils.parse_cache import LazyTree, ParseCache, SQLiteParseCache
+from ast_rag.utils.bounded_ast_cache import BoundedASTCache, BoundedParseCache
 from ast_rag.services.parsing.parser_manager import ParserManager
 
 
@@ -482,7 +485,7 @@ class TestParserManagerSQLite:
 
     def test_factory_creates_memory_cache_by_default(self):
         pm = ParserManager()
-        assert isinstance(pm._cache, ParseCache)
+        assert isinstance(pm._cache, BoundedParseCache)
 
     def test_sqlite_hit_after_restart(self):
         """Second ParserManager on the same DB must benefit from the first run."""
@@ -541,5 +544,192 @@ class TestWorkerResolve:
             pm = ParserManager()
             tree = pm.parse_file(path, resolve=True)
             assert tree is not None
+        finally:
+            os.unlink(path)
+
+
+# ===========================================================================
+# Unit tests: BoundedASTCache (dict-style LRU with dual limits)
+# ===========================================================================
+
+
+class TestBoundedASTCache:
+    """Test BoundedASTCache entry+memory limits and LRU behaviour."""
+
+    def test_entry_limit_evicts_oldest(self):
+        cache = BoundedASTCache(max_entries=5, max_memory_mb=1000)
+        for i in range(10):
+            key = f"/test/file_{i}.py"
+            tree = _make_sentinel_tree()
+            source = f"x = {i}\n".encode()
+            cache.set_with_source(key, (tree, "python"), source)
+        assert len(cache) <= 5, f"Expected <= 5 entries, got {len(cache)}"
+        # Oldest entries should be evicted
+        assert "/test/file_0.py" not in cache
+        assert "/test/file_9.py" in cache
+
+    def test_memory_limit_evicts(self):
+        # 1 KB memory limit
+        cache = BoundedASTCache(max_entries=10_000, max_memory_mb=0)  # 0 MB
+        # Setting max_memory_bytes manually for a small test
+        cache.max_memory_bytes = 500  # 500 bytes
+        for i in range(20):
+            key = f"/test/file_{i}.py"
+            tree = _make_sentinel_tree()
+            source = b"x" * 100  # ~100+ bytes each with sys.getsizeof overhead
+            cache.set_with_source(key, (tree, "python"), source)
+        assert cache._memory_usage <= 500, f"Memory usage {cache._memory_usage} exceeds limit 500"
+
+    def test_lru_recently_used_survives(self):
+        cache = BoundedASTCache(max_entries=3, max_memory_mb=1000)
+        for i in range(3):
+            key = f"/test/file_{i}.py"
+            cache.set_with_source(key, (_make_sentinel_tree(), "python"), b"src")
+        # Access file_0 to make it recently used
+        _ = cache["/test/file_0.py"]
+        # Add file_3 — should evict file_1 (oldest untouched)
+        cache.set_with_source("/test/file_3.py", (_make_sentinel_tree(), "python"), b"src")
+        assert "/test/file_0.py" in cache, "Recently accessed key should survive"
+        assert "/test/file_1.py" not in cache, "Oldest untouched key should be evicted"
+
+    def test_resize_reduces_cache(self):
+        cache = BoundedASTCache(max_entries=100, max_memory_mb=1000)
+        for i in range(100):
+            cache.set_with_source(f"/test/file_{i}.py", (_make_sentinel_tree(), "python"), b"src")
+        assert len(cache) == 100
+        cache.resize(max_entries=50)
+        assert len(cache) <= 50
+
+    def test_getitem_raises_keyerror_on_miss(self):
+        cache = BoundedASTCache(max_entries=10)
+        with pytest.raises(KeyError):
+            _ = cache["/nonexistent.py"]
+
+    def test_delitem_removes_entry(self):
+        cache = BoundedASTCache(max_entries=10)
+        cache.set_with_source("/a.py", (_make_sentinel_tree(), "python"), b"src")
+        assert "/a.py" in cache
+        del cache["/a.py"]
+        assert "/a.py" not in cache
+
+    def test_clear_empties_everything(self):
+        cache = BoundedASTCache(max_entries=10)
+        for i in range(5):
+            cache.set_with_source(f"/test/{i}.py", (_make_sentinel_tree(), "python"), b"src")
+        cache.clear()
+        assert len(cache) == 0
+        assert cache._memory_usage == 0
+
+    def test_get_stats_returns_expected_keys(self):
+        cache = BoundedASTCache(max_entries=100, max_memory_mb=50)
+        stats = cache.get_stats()
+        assert "entries" in stats
+        assert "max_entries" in stats
+        assert "memory_mb" in stats
+        assert "max_memory_mb" in stats
+        assert "utilization_entries" in stats
+        assert "utilization_memory" in stats
+        assert stats["max_entries"] == 100
+        assert stats["max_memory_mb"] == 50
+
+
+# ===========================================================================
+# Integration tests: BoundedParseCache adapter
+# ===========================================================================
+
+
+class TestBoundedParseCache:
+    """Test BoundedParseCache adapter with ParseCache-compatible interface."""
+
+    def test_get_returns_none_on_empty_cache(self):
+        cache = BoundedParseCache(max_entries=100)
+        assert cache.get("/f.py", b"x=1") is None
+
+    def test_put_then_get_returns_lazytree(self):
+        cache = BoundedParseCache(max_entries=100)
+        sentinel = _make_sentinel_tree()
+        cache.put("/f.py", b"x=1", sentinel)
+        lazy = cache.get("/f.py", b"x=1")
+        assert lazy is not None
+        assert lazy.resolve() is sentinel
+
+    def test_get_returns_none_on_hash_mismatch(self):
+        cache = BoundedParseCache(max_entries=100)
+        cache.put("/f.py", b"x=1", _make_sentinel_tree())
+        assert cache.get("/f.py", b"x=999") is None
+
+    def test_evict_removes_entry(self):
+        cache = BoundedParseCache(max_entries=100)
+        cache.put("/f.py", b"src", _make_sentinel_tree())
+        cache.evict("/f.py")
+        assert cache.get("/f.py", b"src") is None
+
+    def test_clear_empties_cache(self):
+        cache = BoundedParseCache(max_entries=100)
+        cache.put("/a.py", b"a", _make_sentinel_tree())
+        cache.put("/b.py", b"b", _make_sentinel_tree())
+        cache.clear()
+        assert cache.stats()["size"] == 0
+
+    def test_stats_includes_memory_keys(self):
+        cache = BoundedParseCache(max_entries=100, max_memory_mb=50)
+        s = cache.stats()
+        assert "memory_mb" in s
+        assert "max_memory_mb" in s
+        assert "max_entries" in s
+        assert "hit_rate" in s
+
+    def test_stats_hit_rate(self):
+        cache = BoundedParseCache(max_entries=100)
+        cache.put("/f.py", b"src", _make_sentinel_tree())
+        cache.get("/f.py", b"src")  # HIT
+        cache.get("/f.py", b"other")  # MISS
+        s = cache.stats()
+        assert s["hits"] == 1
+        assert s["misses"] == 1
+        assert s["hit_rate"] == pytest.approx(0.5)
+
+    def test_entry_limit_enforced_via_adapter(self):
+        cache = BoundedParseCache(max_entries=5)
+        for i in range(10):
+            cache.put(f"/f{i}.py", f"x={i}".encode(), _make_sentinel_tree())
+        assert cache.stats()["size"] <= 5
+
+    def test_pm_uses_bounded_cache_by_default(self):
+        """ParserManager with no explicit cache should default to BoundedParseCache."""
+        pm = ParserManager()
+        assert isinstance(pm._cache, BoundedParseCache)
+
+    def test_pm_reads_limits_from_config(self):
+        """ParserManager should read max_entries/max_size_mb from config."""
+        pm = ParserManager(
+            config={
+                "parse_cache": {
+                    "max_entries": 42,
+                    "max_size_mb": 7,
+                }
+            }
+        )
+        assert isinstance(pm._cache, BoundedParseCache)
+        assert pm._cache._inner.max_entries == 42
+        assert pm._cache._inner.max_memory_bytes == 7 * 1024 * 1024
+
+    def test_pm_explicit_cache_injection_still_works(self):
+        """Caller-supplied ParseCache must be used as-is."""
+        custom = ParseCache()
+        pm = ParserManager(cache=custom)
+        assert pm._cache is custom
+
+    def test_pm_parse_file_with_bounded_cache(self):
+        """ParserManager with BoundedParseCache should parse and cache correctly."""
+        path = _tmp(".py", b"def hello(): pass\n")
+        try:
+            pm = ParserManager()
+            t1 = pm.parse_file(path)
+            t2 = pm.parse_file(path)
+            assert t1 is not None
+            assert t2 is not None
+            # Should have hit the cache
+            assert pm.tree_cache_stats()["hits"] == 1
         finally:
             os.unlink(path)

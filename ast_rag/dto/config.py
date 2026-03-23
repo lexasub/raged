@@ -66,6 +66,22 @@ class EmbeddingConfig(BaseModel):
     keyword_weight: float = 0.3
 
 
+class ParseCacheConfig(BaseModel):
+    """Parse cache configuration.
+
+    Attributes:
+        max_entries: Maximum number of cached parse trees (default: 10000)
+        max_size_mb: Maximum memory usage in MB (default: 500)
+        persistence_enabled: Use SQLite persistent cache instead of in-memory
+        db_path: Path for the SQLite cache file
+    """
+
+    max_entries: int = 10_000
+    max_size_mb: int = 500
+    persistence_enabled: bool = False
+    db_path: str = ".ast_rag_parse_cache.sqlite"
+
+
 class ProjectConfig(BaseModel):
     """Top-level configuration for the AST-RAG system.
 
@@ -73,6 +89,7 @@ class ProjectConfig(BaseModel):
         neo4j: Neo4j configuration
         qdrant: Qdrant configuration
         embedding: Embedding configuration
+        parse_cache: Parse cache configuration
         language_extensions: File extensions per language
         exclude_patterns: Patterns to exclude during indexing
     """
@@ -80,6 +97,7 @@ class ProjectConfig(BaseModel):
     neo4j: Neo4jConfig = Field(default_factory=Neo4jConfig)
     qdrant: QdrantConfig = Field(default_factory=QdrantConfig)
     embedding: EmbeddingConfig = Field(default_factory=EmbeddingConfig)
+    parse_cache: ParseCacheConfig = Field(default_factory=ParseCacheConfig)
     language_extensions: dict[str, list[str]] = Field(
         default_factory=lambda: {
             "cpp": [".cpp", ".cxx", ".cc", ".c", ".hpp", ".hxx", ".hh", ".h"],

@@ -34,6 +34,7 @@ from ast_rag.services.parsing import LANGUAGE_QUERIES
 from ast_rag.services.parsing.node_extractor import NodeExtractor
 from ast_rag.services.parsing.edge_extractor import EdgeExtractor
 from ast_rag.utils.parse_cache import ParseCache, SQLiteParseCache
+from ast_rag.utils.bounded_ast_cache import BoundedParseCache
 
 logger = logging.getLogger(__name__)
 
@@ -63,11 +64,25 @@ class ParserManager:
         tree = pm.parse_file("/path/to/Foo.java")
         nodes = pm.extract_nodes(tree, "/path/to/Foo.java", "java")
         edges = pm.extract_edges(tree, nodes, "/path/to/Foo.java", "java")
+
+    Backend selection
+    -----------------
+    Pass an explicit ``cache=`` instance *or* let the factory choose based on
+    ``config["parse_cache"]["persistence_enabled"]``:
+
+        # Bounded in-memory (default)
+        pm = ParserManager()
+
+        # SQLite (persistent across restarts)
+        pm = ParserManager(config={"parse_cache": {"persistence_enabled": True}})
+
+        # Explicit injection (useful in tests)
+        pm = ParserManager(cache=SQLiteParseCache("/tmp/test.sqlite"))
     """
 
     def __init__(
         self,
-        cache: Optional[Union[ParseCache, SQLiteParseCache]] = None,
+        cache: Optional[Union[ParseCache, SQLiteParseCache, BoundedParseCache]] = None,
         config: Optional[dict] = None,
         project_id: str = "default",
     ) -> None:
@@ -79,8 +94,9 @@ class ParserManager:
         self._node_extractor = NodeExtractor(project_id=project_id)
         self._edge_extractor = EdgeExtractor(project_id=project_id)
 
+        # Factory: caller-supplied cache > config-driven > default bounded in-memory.
         if cache is not None:
-            self._cache: Union[ParseCache, SQLiteParseCache] = cache
+            self._cache: Union[ParseCache, SQLiteParseCache, BoundedParseCache] = cache
         else:
             pc_cfg: dict = (config or {}).get("parse_cache", {})
             if pc_cfg.get("persistence_enabled", False):
@@ -88,7 +104,15 @@ class ParserManager:
                 self._cache = SQLiteParseCache(db_path)
                 logger.info("ParserManager: using SQLiteParseCache at %s", db_path)
             else:
-                self._cache = ParseCache()
+                self._cache = BoundedParseCache(
+                    max_entries=pc_cfg.get("max_entries", 10_000),
+                    max_memory_mb=pc_cfg.get("max_size_mb", 500),
+                )
+                logger.info(
+                    "ParserManager: using BoundedParseCache (max_entries=%d, max_memory_mb=%d)",
+                    self._cache._inner.max_entries,
+                    self._cache._inner.max_memory_bytes // (1024 * 1024),
+                )
         self._init_languages()
 
     def _init_languages(self) -> None:
