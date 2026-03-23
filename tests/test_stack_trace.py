@@ -8,14 +8,12 @@ Tests cover:
 """
 
 import pytest
-from pathlib import Path
 
 from ast_rag.stack_trace.models import (
     Language,
     FrameType,
     StackFrame,
     RootCause,
-    SimilarIssue,
     StackTraceReport,
 )
 from ast_rag.stack_trace.parsers import (

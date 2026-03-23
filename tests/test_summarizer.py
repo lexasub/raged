@@ -6,18 +6,16 @@ Run with: pytest tests/test_summarizer.py -v
 
 from __future__ import annotations
 
-import json
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from ast_rag.summarizer import (
+from ast_rag.services.summarizer_service import (
     SummarizerService,
     NodeSummary,
     ComplexityLevel,
     SummaryCacheEntry,
     SUMMARY_PROMPT_TEMPLATE,
 )
-from ast_rag.models import ASTNode, NodeKind, Language
 
 
 class TestNodeSummary:

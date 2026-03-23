@@ -1,3 +1,8 @@
+import pytest
+
+from neo4j.exceptions import ServiceUnavailable
+
+
 def test_update_project_dry_run():
     """Test the update_project_dry_run MCP tool."""
     from ast_rag.ast_rag_mcp import update_project_dry_run
@@ -24,7 +29,11 @@ def test_search_by_signature_format():
     """Test the search_by_signature MCP tool returns StandardResult format."""
     from ast_rag.ast_rag_mcp import search_by_signature
 
-    results = search_by_signature("*(int, String)", lang="java", limit=5)
+    try:
+        results = search_by_signature("*(int, String)", lang="java", limit=5)
+    except ServiceUnavailable as exc:
+        pytest.skip(f"Neo4j unavailable for integration-style search test: {exc}")
+
     assert isinstance(results, list)
     if results:
         assert "id" in results[0]

@@ -24,7 +24,7 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from ast_rag.parse_cache import LazyTree, ParseCache, SQLiteParseCache
+from ast_rag.utils.parse_cache import LazyTree, ParseCache, SQLiteParseCache
 from ast_rag.services.parsing.parser_manager import ParserManager
 
 
@@ -70,7 +70,7 @@ class TestLazyTree:
             called.append(1)
             return sentinel
 
-        lazy = LazyTree(loader)
+        _ = LazyTree(loader)
         assert called == [], "loader must not be called at construction"
 
     def test_first_attribute_access_triggers_load(self):
@@ -182,7 +182,11 @@ class TestParseCacheUnit:
         sentinel = _make_sentinel_tree()
         cache.put("/f.py", b"src", sentinel)
         called = []
-        loader = lambda: called.append(1) or _make_sentinel_tree()
+
+        def loader():
+            called.append(1)
+            return _make_sentinel_tree()
+
         lazy = cache.get("/f.py", b"src", loader=loader)
         assert lazy is not None
         _ = lazy.resolve()
@@ -246,7 +250,10 @@ class TestSQLiteParseCache:
         try:
             cache = SQLiteParseCache(db)
             sentinel = _make_sentinel_tree()
-            loader = lambda: sentinel
+
+            def loader():
+                return sentinel
+
             assert cache.get("/f.py", b"src", loader=loader) is None
         finally:
             if os.path.exists(db):

@@ -40,6 +40,7 @@ Thumbs.db
 test_*.json
 ground_truth_*.json
 queries_sample.json
+.ast_rag_summary_cache.json
 
 # Benchmark results (optional - uncomment to ignore)
 # benchmarks/results/*.json
