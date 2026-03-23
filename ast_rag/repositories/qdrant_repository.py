@@ -21,17 +21,12 @@ from qdrant_client.models import (
     Distance,
     VectorParams,
     PointStruct,
-    PointIdsList,
     Filter,
     FieldCondition,
-    MatchValue,
-    MatchText,
-    Range,
-    SearchParams,
     ScoredPoint,
 )
 
-from ast_rag.dto import QdrantConfig, SearchResult, ASTNode
+from ast_rag.dto import QdrantConfig, SearchResult
 
 
 class QdrantRepository:
@@ -45,11 +40,11 @@ class QdrantRepository:
 
         config = QdrantConfig(url="http://localhost:6333", collection_name="ast_rag")
         repo = QdrantRepository(config)
-        
+
         # Upsert points
         points = [PointStruct(id=1, vector=[...], payload={...})]
         repo.upsert_points(points)
-        
+
         # Search
         results = repo.search_vectors(query_vector=[...], limit=10)
 
@@ -139,7 +134,7 @@ class QdrantRepository:
     def get_collection_info(
         self,
         collection_name: Optional[str] = None,
-    ) -> Optional[CollectionInfo]:
+    ) -> "Optional[CollectionInfo]":  # noqa: F821
         """Get information about a collection.
 
         Args:

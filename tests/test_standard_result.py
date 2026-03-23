@@ -1,6 +1,6 @@
 def test_standard_result_creation():
     from ast_rag.models import StandardResult
-    
+
     result = StandardResult(
         id="test123",
         name="processRequest",

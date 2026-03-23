@@ -38,6 +38,7 @@ class ASTNode(BaseModel):
         valid_to: Version when this node was deleted (None = current)
         source_text: Raw source text (not persisted to graph)
     """
+
     id: str = Field(default="", description="Stable SHA-256 based identifier")
     kind: NodeKind
     name: str
@@ -86,9 +87,12 @@ class ASTNode(BaseModel):
             "valid_to": self.valid_to,
         }
 
-    def to_standard_result(self, score: Optional[float] = None, edge_type: Optional[str] = None) -> "StandardResult":
+    def to_standard_result(
+        self, score: Optional[float] = None, edge_type: Optional[str] = None
+    ) -> "StandardResult":  # noqa: F821
         """Convert ASTNode to StandardResult."""
         from ast_rag.dto.result import StandardResult
+
         return StandardResult(
             id=self.id,
             name=self.name,
@@ -120,6 +124,7 @@ class ASTEdge(BaseModel):
         raw_type_string: Original type annotation for TYPES edges
         confidence: Certainty score for OVERRIDES edges
     """
+
     id: str = Field(default="", description="Stable edge identifier")
     kind: EdgeKind
     from_id: str

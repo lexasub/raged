@@ -160,7 +160,7 @@ LIMIT 100
         # Parse pattern to extract name and signature parts
         # Simple implementation: treat as name pattern with optional signature
         name_pattern = pattern.split("(")[0].strip() if "(" in pattern else pattern
-        signature_part = pattern[len(name_pattern):].strip() if "(" in pattern else ""
+        signature_part = pattern[len(name_pattern) :].strip() if "(" in pattern else ""
 
         conditions = ["n.valid_to IS NULL", "n.kind IN ['Function', 'Method', 'Constructor']"]
         params: dict[str, str] = {}
@@ -262,34 +262,140 @@ LIMIT $limit
     def _extract_identifiers(self, text: str) -> list[str]:
         """Extract identifiers from text (camelCase, snake_case, etc.)."""
         # Match camelCase, snake_case, and simple identifiers
-        pattern = r'\b[a-zA-Z_][a-zA-Z0-9_]*\b'
+        pattern = r"\b[a-zA-Z_][a-zA-Z0-9_]*\b"
         identifiers = re.findall(pattern, text)
 
         # Filter out common words and short identifiers
         common_words = {
-            'the', 'a', 'an', 'is', 'are', 'was', 'were', 'be', 'been', 'being',
-            'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could',
-            'should', 'may', 'might', 'can', 'this', 'that', 'these', 'those',
-            'i', 'you', 'he', 'she', 'it', 'we', 'they', 'what', 'which', 'who',
-            'when', 'where', 'why', 'how', 'all', 'each', 'every', 'both', 'few',
-            'more', 'most', 'other', 'some', 'such', 'no', 'nor', 'not', 'only',
-            'own', 'same', 'so', 'than', 'too', 'very', 'just', 'because', 'but',
-            'and', 'or', 'if', 'while', 'for', 'with', 'about', 'against', 'between',
-            'into', 'through', 'during', 'before', 'after', 'above', 'below', 'to',
-            'from', 'up', 'down', 'in', 'out', 'on', 'off', 'over', 'under', 'again',
-            'further', 'then', 'once', 'here', 'there', 'when', 'where', 'why', 'how',
-            'error', 'exception', 'failed', 'failure', 'success', 'warning', 'info',
-            'debug', 'trace', 'log', 'message', 'code', 'line', 'file', 'function',
-            'method', 'class', 'module', 'package', 'import', 'return', 'value',
+            "the",
+            "a",
+            "an",
+            "is",
+            "are",
+            "was",
+            "were",
+            "be",
+            "been",
+            "being",
+            "have",
+            "has",
+            "had",
+            "do",
+            "does",
+            "did",
+            "will",
+            "would",
+            "could",
+            "should",
+            "may",
+            "might",
+            "can",
+            "this",
+            "that",
+            "these",
+            "those",
+            "i",
+            "you",
+            "he",
+            "she",
+            "it",
+            "we",
+            "they",
+            "what",
+            "which",
+            "who",
+            "when",
+            "where",
+            "why",
+            "how",
+            "all",
+            "each",
+            "every",
+            "both",
+            "few",
+            "more",
+            "most",
+            "other",
+            "some",
+            "such",
+            "no",
+            "nor",
+            "not",
+            "only",
+            "own",
+            "same",
+            "so",
+            "than",
+            "too",
+            "very",
+            "just",
+            "because",
+            "but",
+            "and",
+            "or",
+            "if",
+            "while",
+            "for",
+            "with",
+            "about",
+            "against",
+            "between",
+            "into",
+            "through",
+            "during",
+            "before",
+            "after",
+            "above",
+            "below",
+            "to",
+            "from",
+            "up",
+            "down",
+            "in",
+            "out",
+            "on",
+            "off",
+            "over",
+            "under",
+            "again",
+            "further",
+            "then",
+            "once",
+            "here",
+            "there",
+            "when",
+            "where",
+            "why",
+            "how",
+            "error",
+            "exception",
+            "failed",
+            "failure",
+            "success",
+            "warning",
+            "info",
+            "debug",
+            "trace",
+            "log",
+            "message",
+            "code",
+            "line",
+            "file",
+            "function",
+            "method",
+            "class",
+            "module",
+            "package",
+            "import",
+            "return",
+            "value",
         }
 
         # Filter and deduplicate
         filtered = []
         seen = set()
         for ident in identifiers:
-            if (len(ident) > 2 and
-                ident.lower() not in common_words and
-                ident not in seen):
+            if len(ident) > 2 and ident.lower() not in common_words and ident not in seen:
                 filtered.append(ident)
                 seen.add(ident)
 
@@ -344,16 +450,18 @@ LIMIT $limit
             with self._driver.session() as session:
                 for record in session.run(cypher, **params):
                     block_data = dict(record["b"])
-                    results.append({
-                        "id": block_data.get("id", ""),
-                        "block_type": block_data.get("block_type", ""),
-                        "lang": block_data.get("lang", ""),
-                        "file_path": block_data.get("file_path", ""),
-                        "start_line": block_data.get("start_line", 0),
-                        "end_line": block_data.get("end_line", 0),
-                        "nesting_depth": block_data.get("nesting_depth", 0),
-                        "parent_function_id": block_data.get("parent_function_id", ""),
-                    })
+                    results.append(
+                        {
+                            "id": block_data.get("id", ""),
+                            "block_type": block_data.get("block_type", ""),
+                            "lang": block_data.get("lang", ""),
+                            "file_path": block_data.get("file_path", ""),
+                            "start_line": block_data.get("start_line", 0),
+                            "end_line": block_data.get("end_line", 0),
+                            "nesting_depth": block_data.get("nesting_depth", 0),
+                            "parent_function_id": block_data.get("parent_function_id", ""),
+                        }
+                    )
         except Exception as exc:
             logger.warning("Block search failed: %s", exc)
 

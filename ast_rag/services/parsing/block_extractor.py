@@ -17,9 +17,8 @@ from __future__ import annotations
 
 import logging
 from typing import Optional
-from collections import defaultdict
 
-from tree_sitter import Tree, QueryCursor, Node
+from tree_sitter import Tree, Node
 
 from ast_rag.models import ASTBlock, BlockType, Language, ASTNode
 from ast_rag.services.parsing import LANGUAGE_QUERIES
@@ -104,8 +103,6 @@ class BlockExtractor:
             qstr = lang_queries.get(qname)
             if qstr:
                 try:
-                    from tree_sitter import Language, Query
-
                     # We need the language object - extract from context
                     # For now, we'll compile queries on-demand
                     compiled_queries[qname] = qstr
@@ -149,13 +146,7 @@ class BlockExtractor:
                 continue
 
             try:
-                from tree_sitter import Language, Query, Parser
-
                 # Get the language
-                lang_map = {
-                    "python": "python",
-                    "rust": "rust",
-                }
                 # We need to get the actual Language object
                 # This is a bit tricky - we'll use a different approach
                 # Just iterate through the tree manually for now

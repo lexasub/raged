@@ -615,9 +615,16 @@ class EdgeExtractor:
                     target_id = hashlib.sha256(f"crossfile:{symbol_name}".encode()).hexdigest()[:24]
                     enclosing_method = None
                     for n in nodes:
-                        if n.kind in (NodeKind.METHOD, NodeKind.FUNCTION, NodeKind.CONSTRUCTOR, NodeKind.DESTRUCTOR):
+                        if n.kind in (
+                            NodeKind.METHOD,
+                            NodeKind.FUNCTION,
+                            NodeKind.CONSTRUCTOR,
+                            NodeKind.DESTRUCTOR,
+                        ):
                             if n.start_byte <= node.start_byte and n.end_byte >= node.end_byte:
-                                if enclosing_method is None or (n.end_byte - n.start_byte) < (enclosing_method.end_byte - enclosing_method.start_byte):
+                                if enclosing_method is None or (n.end_byte - n.start_byte) < (
+                                    enclosing_method.end_byte - enclosing_method.start_byte
+                                ):
                                     enclosing_method = n
                     from_id = enclosing_method.id if enclosing_method else file_node_id
                     edges.append(
@@ -752,11 +759,6 @@ def _add_type_relation_edges(
                             valid_from=commit_hash,
                         )
                     )
-
-        if lang == "rust":
-            edges.extend(
-                self._extract_rust_edges(tree, nodes, source, commit_hash, compiled_queries)
-            )
 
         return edges
 

@@ -45,16 +45,16 @@ class GroundTruthGenerator:
 
     def generate_query_for_node(self, node: Dict[str, Any], node_type: str) -> Dict[str, Any]:
         """Generate a natural language query for a specific node."""
-        name = node.get('name', '')
-        qualified_name = node.get('qualified_name', '')
+        name = node.get("name", "")
+        qualified_name = node.get("qualified_name", "")
 
-        if node_type == 'Class':
+        if node_type == "Class":
             query = f"class that handles {name}"
-        elif node_type == 'Function':
+        elif node_type == "Function":
             query = f"function named {name}"
-        elif node_type == 'Method':
+        elif node_type == "Method":
             # Extract class name from qualified_name (e.g., "EmbeddingManager.hybrid_search")
-            parts = qualified_name.split('.')
+            parts = qualified_name.split(".")
             if len(parts) >= 2:
                 class_name = parts[0]
                 method_name = parts[-1]
@@ -64,28 +64,25 @@ class GroundTruthGenerator:
         else:
             query = f"{node_type.lower()} named {name}"
 
-        return {
-            "query": query,
-            "relevant_ids": [
-                {"id": node['id'], "score": 3}
-            ]
-        }
+        return {"query": query, "relevant_ids": [{"id": node["id"], "score": 3}]}
 
-    def generate_ground_truth(self, output_path: str = "ground_truth_queries.json", num_nodes_per_type: int = 7) -> None:
+    def generate_ground_truth(
+        self, output_path: str = "ground_truth_queries.json", num_nodes_per_type: int = 7
+    ) -> None:
         """Generate ground truth queries for random nodes."""
         # Get random nodes of each type
-        classes = self.get_random_nodes('Class', num_nodes_per_type)
-        functions = self.get_random_nodes('Function', num_nodes_per_type)
-        methods = self.get_random_nodes('Method', num_nodes_per_type)
+        classes = self.get_random_nodes("Class", num_nodes_per_type)
+        functions = self.get_random_nodes("Function", num_nodes_per_type)
+        methods = self.get_random_nodes("Method", num_nodes_per_type)
 
         # Combine all nodes
         all_entries = []
         for node in classes:
-            all_entries.append((node, 'Class'))
+            all_entries.append((node, "Class"))
         for node in functions:
-            all_entries.append((node, 'Function'))
+            all_entries.append((node, "Function"))
         for node in methods:
-            all_entries.append((node, 'Method'))
+            all_entries.append((node, "Method"))
 
         random.shuffle(all_entries)
         all_entries = all_entries[:20]  # Take up to 20 total
@@ -99,10 +96,10 @@ class GroundTruthGenerator:
         # Save to JSON file
         output = {
             "description": "Ground truth queries generated from actual Neo4j data",
-            "queries": queries
+            "queries": queries,
         }
 
-        with open(output_path, 'w') as f:
+        with open(output_path, "w") as f:
             json.dump(output, f, indent=2)
 
         logger.info(f"Generated {len(queries)} ground truth queries in {output_path}")
@@ -116,7 +113,7 @@ def main():
 
     # Load configuration
     logger.info("Loading config from ast_rag_config.json")
-    with open('ast_rag_config.json', 'r') as f:
+    with open("ast_rag_config.json", "r") as f:
         config_data = json.load(f)
     cfg = ProjectConfig(**config_data)
 

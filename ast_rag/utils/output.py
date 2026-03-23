@@ -156,9 +156,7 @@ class HumanFormatter(OutputFormatter):
             )
 
             if snippet and api:
-                code = api.get_code_snippet(
-                    node.file_path, node.start_line, node.end_line
-                )
+                code = api.get_code_snippet(node.file_path, node.start_line, node.end_line)
                 if code:
                     lang_map = {
                         "java": "java",

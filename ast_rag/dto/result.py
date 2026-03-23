@@ -10,7 +10,6 @@ from typing import Optional
 from pydantic import BaseModel, Field
 
 from ast_rag.dto.node import ASTNode, ASTEdge
-from ast_rag.dto.block import ASTBlock
 
 
 class DiffResult(BaseModel):
@@ -26,6 +25,7 @@ class DiffResult(BaseModel):
         updated_edges: New versions of updated edges
         old_updated_edge_ids: Old IDs of updated edges to expire
     """
+
     added_nodes: list[ASTNode] = Field(default_factory=list)
     deleted_node_ids: list[str] = Field(default_factory=list)
     updated_nodes: list[ASTNode] = Field(default_factory=list)
@@ -55,6 +55,7 @@ class SubGraph(BaseModel):
         nodes: List of AST nodes in the subgraph
         edges: List of edges connecting the nodes
     """
+
     nodes: list[ASTNode] = Field(default_factory=list)
     edges: list[ASTEdge] = Field(default_factory=list)
 
@@ -66,6 +67,7 @@ class SearchResult(BaseModel):
         node: The matched AST node
         score: Relevance score (0.0-1.0)
     """
+
     node: ASTNode
     score: float
 
@@ -93,6 +95,7 @@ class StandardResult(BaseModel):
         edge_type: Edge type for reference results
         metadata: Extra fields (confidence, raw_type_string, etc.)
     """
+
     id: str
     name: str
     qualified_name: str

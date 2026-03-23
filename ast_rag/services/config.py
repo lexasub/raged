@@ -24,6 +24,7 @@ class LLMConfig:
         max_tokens: Maximum tokens in response
         timeout: Request timeout in seconds
     """
+
     url: Optional[str] = None
     model: str = "qwen2.5-coder:14b"
     temperature: float = 0.1
@@ -54,6 +55,7 @@ class ServiceConfig:
         ...     llm_url="http://localhost:11434/v1"
         ... )
     """
+
     # Neo4j configuration
     neo4j_uri: str = "bolt://localhost:7687"
     neo4j_user: str = "neo4j"
@@ -84,10 +86,21 @@ class ServiceConfig:
     llm_timeout: int = 120
 
     # Indexing configuration
-    exclude_patterns: list[str] = field(default_factory=lambda: [
-        ".git", "__pycache__", "node_modules", "target", "build", "dist",
-        ".gradle", ".idea", ".vscode", "venv", ".venv",
-    ])
+    exclude_patterns: list[str] = field(
+        default_factory=lambda: [
+            ".git",
+            "__pycache__",
+            "node_modules",
+            "target",
+            "build",
+            "dist",
+            ".gradle",
+            ".idea",
+            ".vscode",
+            "venv",
+            ".venv",
+        ]
+    )
 
     def to_neo4j_config(self) -> Neo4jConfig:
         """Convert to Neo4jConfig."""
@@ -165,11 +178,9 @@ class ServiceConfig:
             neo4j_password=neo4j.get("password", "password"),
             neo4j_timeout=neo4j.get("connection_timeout", 30),
             neo4j_max_pool_size=neo4j.get("max_connection_pool_size", 50),
-
             qdrant_url=qdrant.get("url", "http://localhost:6333"),
             qdrant_collection=qdrant.get("collection_name", "ast_rag_nodes"),
             qdrant_timeout=qdrant.get("timeout", 60),
-
             embedding_model=embedding.get("model_name", "BAAI/bge-m3"),
             embedding_remote_url=embedding.get("remote_url"),
             embedding_remote_batch_size=embedding.get("remote_batch_size", 32),

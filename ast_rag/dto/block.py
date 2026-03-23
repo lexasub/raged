@@ -38,6 +38,7 @@ class ASTBlock(BaseModel):
         valid_from: Version when this block was added
         valid_to: Version when this block was deleted
     """
+
     id: str = Field(default="", description="Stable SHA-256 based identifier")
     block_type: BlockType
     name: str = Field(default="", description="Optional name")
@@ -85,9 +86,10 @@ class ASTBlock(BaseModel):
             "valid_to": self.valid_to,
         }
 
-    def to_standard_result(self, score: Optional[float] = None) -> "StandardResult":
+    def to_standard_result(self, score: Optional[float] = None) -> "StandardResult":  # noqa: F821
         """Convert ASTBlock to StandardResult."""
         from ast_rag.dto.result import StandardResult
+
         return StandardResult(
             id=self.id,
             name=self.name or f"{self.block_type.value}_block",

@@ -42,11 +42,19 @@ from ast_rag.models import ASTNode, SearchResult, QdrantConfig, EmbeddingConfig,
 logger = logging.getLogger(__name__)
 
 # Node kinds that are worth embedding (ignore field-level noise)
-EMBEDDABLE_KINDS = frozenset([
-    NodeKind.CLASS, NodeKind.INTERFACE, NodeKind.STRUCT, NodeKind.ENUM,
-    NodeKind.TRAIT, NodeKind.FUNCTION, NodeKind.METHOD,
-    NodeKind.CONSTRUCTOR, NodeKind.DESTRUCTOR,
-])
+EMBEDDABLE_KINDS = frozenset(
+    [
+        NodeKind.CLASS,
+        NodeKind.INTERFACE,
+        NodeKind.STRUCT,
+        NodeKind.ENUM,
+        NodeKind.TRAIT,
+        NodeKind.FUNCTION,
+        NodeKind.METHOD,
+        NodeKind.CONSTRUCTOR,
+        NodeKind.DESTRUCTOR,
+    ]
+)
 
 
 def build_summary(node: ASTNode) -> str:
@@ -95,7 +103,7 @@ class EmbeddingManager:
                 logger.warning(
                     "Hybrid weights sum to %.2f (expected ~1.0). "
                     "Consider adjusting vector_weight and keyword_weight.",
-                    total
+                    total,
                 )
 
     # ------------------------------------------------------------------
@@ -105,8 +113,11 @@ class EmbeddingManager:
     def _get_model(self) -> SentenceTransformer:
         """Return local SentenceTransformer.  Not called when remote_url is set."""
         if self._model is None:
-            logger.info("Loading embedding model locally: %s (device=%s)",
-                        self._embed_config.model_name, self._embed_config.device)
+            logger.info(
+                "Loading embedding model locally: %s (device=%s)",
+                self._embed_config.model_name,
+                self._embed_config.device,
+            )
             self._model = SentenceTransformer(
                 self._embed_config.model_name,
                 device=self._embed_config.device,
@@ -160,7 +171,8 @@ class EmbeddingManager:
         if len(texts) > batch_size:
             logger.debug(
                 "Sub-batching %d texts into chunks of %d for remote encoding",
-                len(texts), batch_size,
+                len(texts),
+                batch_size,
             )
             parts: list[np.ndarray] = []
             for i in range(0, len(texts), batch_size):
@@ -365,13 +377,9 @@ class EmbeddingManager:
 
         must_conditions = []
         if lang_filter:
-            must_conditions.append(
-                FieldCondition(key="lang", match=MatchValue(value=lang_filter))
-            )
+            must_conditions.append(FieldCondition(key="lang", match=MatchValue(value=lang_filter)))
         if kind_filter:
-            must_conditions.append(
-                FieldCondition(key="kind", match=MatchValue(value=kind_filter))
-            )
+            must_conditions.append(FieldCondition(key="kind", match=MatchValue(value=kind_filter)))
 
         query_filter = Filter(must=must_conditions) if must_conditions else None
 
@@ -400,9 +408,12 @@ class EmbeddingManager:
             logger.debug(
                 "Only %d results with filters (lang=%s, kind=%s), "
                 "searching across all languages for %d more",
-                len(results), lang_filter, kind_filter, remaining
+                len(results),
+                lang_filter,
+                kind_filter,
+                remaining,
             )
-            
+
             # Search without language filter to fill remaining
             fallback_response = client.query_points(
                 collection_name=name,
@@ -411,7 +422,7 @@ class EmbeddingManager:
                 limit=remaining,
                 with_payload=True,
             )
-            
+
             for hit in fallback_response.points:
                 node = _payload_to_node(hit.payload or {})
                 # Avoid duplicates
@@ -473,7 +484,8 @@ class EmbeddingManager:
         # Build Cypher query for full-text search
         lang_clause = "AND node.lang = $lang" if lang_filter else ""
 
-        cypher = """
+        cypher = (
+            """
 CALL db.index.fulltext.queryNodes(
     'ast_symbol_fulltext',
     $search_query,
@@ -481,10 +493,13 @@ CALL db.index.fulltext.queryNodes(
 )
 YIELD node, score
 WHERE node.valid_to IS NULL
-  """ + lang_clause + """
+  """
+            + lang_clause
+            + """
 RETURN node, score
 ORDER BY score DESC
 """
+        )
         params: dict = {
             "search_query": query,
             "limit": limit,
@@ -580,11 +595,17 @@ ORDER BY score DESC
         # Build lookup dicts: node_id -> (node, normalized_score)
         vector_dict: dict[str, tuple[ASTNode, float]] = {}
         for i, r in enumerate(vector_results):
-            vector_dict[r.node.id] = (r.node, normalized_vector_scores[i] if i < len(normalized_vector_scores) else 0.0)
+            vector_dict[r.node.id] = (
+                r.node,
+                normalized_vector_scores[i] if i < len(normalized_vector_scores) else 0.0,
+            )
 
         keyword_dict: dict[str, tuple[ASTNode, float]] = {}
         for i, (node, score) in enumerate(keyword_results):
-            keyword_dict[node.id] = (node, normalized_keyword_scores[i] if i < len(normalized_keyword_scores) else 0.0)
+            keyword_dict[node.id] = (
+                node,
+                normalized_keyword_scores[i] if i < len(normalized_keyword_scores) else 0.0,
+            )
 
         # Combine: union of both result sets
         all_node_ids = set(vector_dict.keys()) | set(keyword_dict.keys())
@@ -612,6 +633,7 @@ ORDER BY score DESC
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _node_to_payload(node: ASTNode) -> dict:
     """Convert an ASTNode to a Qdrant payload dict."""
     return {
@@ -631,6 +653,7 @@ def _node_to_payload(node: ASTNode) -> dict:
 def _payload_to_node(payload: dict) -> ASTNode:
     """Reconstruct a minimal ASTNode from Qdrant payload (for search results)."""
     from ast_rag.models import Language as Lang
+
     return ASTNode(
         id=payload.get("node_id", ""),
         kind=NodeKind(payload.get("kind", "Function")),

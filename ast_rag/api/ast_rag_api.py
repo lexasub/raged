@@ -945,8 +945,8 @@ RETURN count(*) as count
         total = self._count_usages_of_node(node_id)
 
         # Query for incoming CALLS edges with pagination
-        calls_cypher = f"""
-MATCH (caller)-[r:CALLS]->(target {{id: $node_id}})
+        calls_cypher = """
+MATCH (caller)-[r:CALLS]->(target {id: $node_id})
 WHERE caller.valid_to IS NULL AND r.valid_to IS NULL
 RETURN caller, r
 ORDER BY caller.qualified_name
@@ -969,8 +969,8 @@ SKIP $offset LIMIT $limit
                 )
 
         # Query for incoming TYPES edges with pagination
-        types_cypher = f"""
-MATCH (user)-[r:TYPES]->(target {{id: $node_id}})
+        types_cypher = """
+MATCH (user)-[r:TYPES]->(target {id: $node_id})
 WHERE user.valid_to IS NULL AND r.valid_to IS NULL
 RETURN user, r
 ORDER BY user.qualified_name
@@ -993,8 +993,8 @@ SKIP $offset LIMIT $limit
                 )
 
         # Query for incoming INHERITS/EXTENDS/IMPLEMENTS edges with pagination
-        inherits_cypher = f"""
-MATCH (child)-[r:INHERITS|EXTENDS|IMPLEMENTS]->(parent {{id: $node_id}})
+        inherits_cypher = """
+MATCH (child)-[r:INHERITS|EXTENDS|IMPLEMENTS]->(parent {id: $node_id})
 WHERE child.valid_to IS NULL AND r.valid_to IS NULL
 RETURN child, r, type(r) as rel_type
 ORDER BY child.qualified_name
@@ -1214,7 +1214,7 @@ SKIP $offset LIMIT $limit
         Returns:
             List of block dictionaries with full details
         """
-        type_filter = f"AND b.block_type = $block_type" if block_type else ""
+        type_filter = "AND b.block_type = $block_type" if block_type else ""
 
         cypher = f"""
 MATCH (f)-[r:CONTAINS_BLOCK]->(b:Block)

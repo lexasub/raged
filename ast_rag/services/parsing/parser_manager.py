@@ -204,7 +204,7 @@ class ParserManager:
         source: Optional[bytes] = None,
         commit_hash: str = "INIT",
     ) -> tuple[list[ASTBlock], list[ASTEdge]]:
-        from ast_rag.models import ASTBlock, ASTEdge, EdgeKind, NodeKind
+        from ast_rag.models import ASTEdge, EdgeKind, NodeKind
 
         if lang not in ("python", "rust"):
             return [], []

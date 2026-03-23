@@ -29,7 +29,7 @@ class TestNodeSummary:
             node_id="test123",
             summary="Test function summary",
         )
-        
+
         assert summary.node_id == "test123"
         assert summary.summary == "Test function summary"
         assert summary.inputs == []
@@ -68,7 +68,7 @@ class TestNodeSummary:
             tags=["async", "io", "validated"],
             model_used="qwen2.5-coder:14b",
         )
-        
+
         assert len(summary.inputs) == 2
         assert len(summary.outputs) == 1
         assert len(summary.side_effects) == 2
@@ -84,9 +84,9 @@ class TestNodeSummary:
             summary="Test summary",
             complexity=ComplexityLevel.LOW,
         )
-        
+
         result = summary.to_dict()
-        
+
         assert isinstance(result, dict)
         assert result["node_id"] == "test789"
         assert result["summary"] == "Test summary"
@@ -103,9 +103,9 @@ class TestNodeSummary:
             complexity=ComplexityLevel.LOW,
             tags=["pure", "getter"],
         )
-        
+
         md = summary.to_markdown()
-        
+
         assert "## Summary:" in md
         assert "Markdown test summary" in md
         assert "### Inputs" in md
@@ -122,7 +122,7 @@ class TestSummaryPromptTemplate:
     def test_prompt_template_structure(self):
         """Test that prompt template has required sections."""
         prompt = SUMMARY_PROMPT_TEMPLATE
-        
+
         assert "Signature" in prompt
         assert "Source Code" in prompt
         assert "Context" in prompt
@@ -141,7 +141,7 @@ class TestSummaryPromptTemplate:
             calls_context="- com.example.other_func",
             callers_context="- com.example.caller_func",
         )
-        
+
         assert "def test_func(x: int) -> str" in formatted
         assert "```python" in formatted
         assert "com.example.other_func" in formatted
@@ -154,7 +154,7 @@ class TestSummarizerService:
     def test_init_defaults(self):
         """Test default initialization."""
         service = SummarizerService()
-        
+
         assert service._base_url == "http://localhost:11434/v1"
         assert service._model == "qwen2.5-coder:14b"
         assert service._api_key == "ollama"
@@ -170,7 +170,7 @@ class TestSummarizerService:
             timeout=60,
             cache_enabled=False,
         )
-        
+
         assert service._base_url == "http://custom:8000/v1"
         assert service._model == "test-model"
         assert service._api_key == "test-key"
@@ -180,15 +180,15 @@ class TestSummarizerService:
     def test_compute_code_hash(self):
         """Test code hash computation."""
         service = SummarizerService()
-        
+
         code1 = "def test(): pass"
         code2 = "def test(): pass"
         code3 = "def other(): pass"
-        
+
         hash1 = service._compute_code_hash(code1)
         hash2 = service._compute_code_hash(code2)
         hash3 = service._compute_code_hash(code3)
-        
+
         assert hash1 == hash2  # Same code = same hash
         assert hash1 != hash3  # Different code = different hash
         assert len(hash1) == 24  # Hash is 24 chars
@@ -196,20 +196,20 @@ class TestSummarizerService:
     def test_cache_operations(self):
         """Test cache save and load."""
         service = SummarizerService(cache_enabled=True)
-        
+
         # Create a test summary
         summary = NodeSummary(
             node_id="cache_test",
             summary="Cached summary",
         )
-        
+
         # Cache it
         code_hash = service._compute_code_hash("test code")
         service._cache_summary("cache_test", code_hash, summary)
-        
+
         # Retrieve from cache
         cached = service._get_cached_summary("cache_test", code_hash)
-        
+
         assert cached is not None
         assert cached.node_id == "cache_test"
         assert cached.summary == "Cached summary"
@@ -217,27 +217,27 @@ class TestSummarizerService:
     def test_cache_invalidates_on_code_change(self):
         """Test that cache is invalidated when code changes."""
         service = SummarizerService(cache_enabled=True)
-        
+
         summary = NodeSummary(
             node_id="invalidate_test",
             summary="Old summary",
         )
-        
+
         # Cache with old code hash
         old_hash = service._compute_code_hash("old code")
         service._cache_summary("invalidate_test", old_hash, summary)
-        
+
         # Try to retrieve with new code hash
         new_hash = service._compute_code_hash("new code")
         cached = service._get_cached_summary("invalidate_test", new_hash)
-        
+
         assert cached is None  # Cache miss due to code change
 
     def test_parse_llm_response_plain_json(self):
         """Test parsing plain JSON response."""
         service = SummarizerService()
-        
-        response = '''
+
+        response = """
         {
             "summary": "Test summary",
             "inputs": [],
@@ -248,18 +248,18 @@ class TestSummarizerService:
             "complexity": "low",
             "tags": []
         }
-        '''
-        
+        """
+
         parsed = service._parse_llm_response(response)
-        
+
         assert parsed["summary"] == "Test summary"
         assert parsed["complexity"] == "low"
 
     def test_parse_llm_response_markdown_wrapped(self):
         """Test parsing Markdown-wrapped JSON response."""
         service = SummarizerService()
-        
-        response = '''
+
+        response = """
         ```json
         {
             "summary": "Markdown wrapped summary",
@@ -272,10 +272,10 @@ class TestSummarizerService:
             "tags": ["test"]
         }
         ```
-        '''
-        
+        """
+
         parsed = service._parse_llm_response(response)
-        
+
         assert parsed["summary"] == "Markdown wrapped summary"
         assert parsed["complexity"] == "medium"
         assert "test" in parsed["tags"]
@@ -284,7 +284,7 @@ class TestSummarizerService:
     async def test_call_llm_async(self):
         """Test async LLM call (mocked)."""
         service = SummarizerService()
-        
+
         mock_response = MagicMock()
         mock_response.json.return_value = {
             "choices": [
@@ -296,12 +296,12 @@ class TestSummarizerService:
             ]
         }
         mock_response.raise_for_status = MagicMock()
-        
-        with patch.object(service, '_client') as mock_client:
+
+        with patch.object(service, "_client") as mock_client:
             mock_client.post = AsyncMock(return_value=mock_response)
-            
+
             result = await service._call_llm_async("Test prompt")
-            
+
             assert "Mock summary" in result
 
 
@@ -330,13 +330,13 @@ class TestSummaryCacheEntry:
             node_id="entry_test",
             summary="Test",
         )
-        
+
         entry = SummaryCacheEntry(
             node_id="entry_test",
             code_hash="abc123",
             summary=summary,
         )
-        
+
         assert entry.node_id == "entry_test"
         assert entry.code_hash == "abc123"
         assert entry.summary == summary

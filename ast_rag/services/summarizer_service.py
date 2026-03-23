@@ -36,8 +36,10 @@ logger = logging.getLogger(__name__)
 # Summary data models
 # ---------------------------------------------------------------------------
 
+
 class ComplexityLevel(str, Enum):
     """Estimated complexity level of a function/class."""
+
     LOW = "low"
     MEDIUM = "medium"
     HIGH = "high"
@@ -62,43 +64,38 @@ class NodeSummary(BaseModel):
         generated_at: ISO timestamp when summary was generated
         model_used: Name of the LLM model used for generation
     """
+
     node_id: str
     summary: str = Field(..., description="Natural language summary of the code")
     inputs: list[dict[str, str]] = Field(
-        default_factory=list,
-        description="Input parameters: [{name, type, description}, ...]"
+        default_factory=list, description="Input parameters: [{name, type, description}, ...]"
     )
     outputs: list[dict[str, str]] = Field(
-        default_factory=list,
-        description="Return values: [{name, type, description}, ...]"
+        default_factory=list, description="Return values: [{name, type, description}, ...]"
     )
     side_effects: list[str] = Field(
         default_factory=list,
-        description="Side effects: IO operations, state mutations, exceptions thrown"
+        description="Side effects: IO operations, state mutations, exceptions thrown",
     )
     calls: list[str] = Field(
-        default_factory=list,
-        description="Functions/methods called by this node (qualified names)"
+        default_factory=list, description="Functions/methods called by this node (qualified names)"
     )
     called_by: list[str] = Field(
-        default_factory=list,
-        description="Functions/methods that call this node (qualified names)"
+        default_factory=list, description="Functions/methods that call this node (qualified names)"
     )
     complexity: ComplexityLevel = Field(
-        default=ComplexityLevel.MEDIUM,
-        description="Estimated complexity level"
+        default=ComplexityLevel.MEDIUM, description="Estimated complexity level"
     )
     tags: list[str] = Field(
         default_factory=list,
-        description="Relevant tags: async, pure, deprecated, thread-safe, etc."
+        description="Relevant tags: async, pure, deprecated, thread-safe, etc.",
     )
     generated_at: str = Field(
         default_factory=lambda: time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        description="ISO timestamp of summary generation"
+        description="ISO timestamp of summary generation",
     )
     model_used: Optional[str] = Field(
-        default=None,
-        description="LLM model name used for generation"
+        default=None, description="LLM model name used for generation"
     )
 
     def to_dict(self) -> dict[str, Any]:
@@ -164,6 +161,7 @@ class NodeSummary(BaseModel):
 
 class SummaryCacheEntry(BaseModel):
     """Cache entry for a generated summary."""
+
     node_id: str
     code_hash: str  # Hash of the code to detect changes
     summary: NodeSummary
@@ -269,6 +267,7 @@ Example response structure:
 # Summarizer Service
 # ---------------------------------------------------------------------------
 
+
 class SummarizerService:
     """Service for generating code summaries using local OpenAI-compatible LLM.
 
@@ -339,10 +338,7 @@ class SummarizerService:
         """Load summary cache from disk."""
         try:
             data = json.loads(self._cache_path.read_text(encoding="utf-8"))
-            self._cache = {
-                k: SummaryCacheEntry.model_validate(v)
-                for k, v in data.items()
-            }
+            self._cache = {k: SummaryCacheEntry.model_validate(v) for k, v in data.items()}
             logger.info("Loaded %d summary cache entries", len(self._cache))
         except Exception as exc:
             logger.warning("Failed to load summary cache: %s", exc)
@@ -353,14 +349,8 @@ class SummarizerService:
         if not self._cache_enabled:
             return
         try:
-            data = {
-                k: v.model_dump()
-                for k, v in self._cache.items()
-            }
-            self._cache_path.write_text(
-                json.dumps(data, indent=2),
-                encoding="utf-8"
-            )
+            data = {k: v.model_dump() for k, v in self._cache.items()}
+            self._cache_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
             logger.debug("Saved %d summary cache entries", len(self._cache))
         except Exception as exc:
             logger.warning("Failed to save summary cache: %s", exc)
@@ -417,12 +407,9 @@ class SummarizerService:
             "messages": [
                 {
                     "role": "system",
-                    "content": "You are an expert code analyst specializing in understanding and summarizing code across multiple programming languages."
+                    "content": "You are an expert code analyst specializing in understanding and summarizing code across multiple programming languages.",
                 },
-                {
-                    "role": "user",
-                    "content": prompt
-                }
+                {"role": "user", "content": prompt},
             ],
             "temperature": 0.1,  # Low temperature for consistent structured output
             "stream": False,
@@ -454,15 +441,19 @@ class SummarizerService:
         """Build caller and callee context strings."""
         # Get callers
         callers = api.find_callers(node.id, max_depth=1)
-        callers_context = "\n".join(
-            f"- {c.qualified_name}" for c in callers[:max_callers]
-        ) if callers else "- (none)"
+        callers_context = (
+            "\n".join(f"- {c.qualified_name}" for c in callers[:max_callers])
+            if callers
+            else "- (none)"
+        )
 
         # Get callees
         callees = api.find_callees(node.id, max_depth=1)
-        calls_context = "\n".join(
-            f"- {c.qualified_name}" for c in callees[:max_callees]
-        ) if callees else "- (none)"
+        calls_context = (
+            "\n".join(f"- {c.qualified_name}" for c in callees[:max_callees])
+            if callees
+            else "- (none)"
+        )
 
         return calls_context, callers_context
 
@@ -487,7 +478,8 @@ class SummarizerService:
             logger.warning("Failed to parse LLM JSON: %s", exc)
             # Try to find JSON in the response
             import re
-            json_match = re.search(r'\{.*\}', text, re.DOTALL)
+
+            json_match = re.search(r"\{.*\}", text, re.DOTALL)
             if json_match:
                 try:
                     return json.loads(json_match.group())
@@ -529,10 +521,14 @@ class SummarizerService:
 
         # Check if node kind is summarizable
         summarizable_kinds = {
-            NodeKind.FUNCTION, NodeKind.METHOD,
-            NodeKind.CONSTRUCTOR, NodeKind.DESTRUCTOR,
-            NodeKind.CLASS, NodeKind.INTERFACE,
-            NodeKind.STRUCT, NodeKind.TRAIT,
+            NodeKind.FUNCTION,
+            NodeKind.METHOD,
+            NodeKind.CONSTRUCTOR,
+            NodeKind.DESTRUCTOR,
+            NodeKind.CLASS,
+            NodeKind.INTERFACE,
+            NodeKind.STRUCT,
+            NodeKind.TRAIT,
         }
         if node.kind not in summarizable_kinds:
             raise ValueError(
@@ -558,9 +554,7 @@ class SummarizerService:
                 return cached
 
         # Build context
-        calls_context, callers_context = self._build_context(
-            node, api, max_callers, max_callees
-        )
+        calls_context, callers_context = self._build_context(node, api, max_callers, max_callees)
 
         # Build prompt
         prompt = SUMMARY_PROMPT_TEMPLATE.format(
@@ -575,11 +569,12 @@ class SummarizerService:
             "Generating summary for %s (%s) - code lines: %d",
             node.qualified_name,
             node.kind.value,
-            node.end_line - node.start_line + 1
+            node.end_line - node.start_line + 1,
         )
 
         # Call LLM (synchronous wrapper for async)
         import asyncio
+
         try:
             loop = asyncio.get_event_loop()
         except RuntimeError:
@@ -599,8 +594,16 @@ class SummarizerService:
                 "inputs": [],
                 "outputs": [],
                 "side_effects": ["Unknown"],
-                "calls": [c.split("- ")[1] for c in calls_context.split("\n") if c.startswith("- ") and c != "- (none)"],
-                "called_by": [c.split("- ")[1] for c in callers_context.split("\n") if c.startswith("- ") and c != "- (none)"],
+                "calls": [
+                    c.split("- ")[1]
+                    for c in calls_context.split("\n")
+                    if c.startswith("- ") and c != "- (none)"
+                ],
+                "called_by": [
+                    c.split("- ")[1]
+                    for c in callers_context.split("\n")
+                    if c.startswith("- ") and c != "- (none)"
+                ],
                 "complexity": "medium",
                 "tags": [],
             }
@@ -614,9 +617,7 @@ class SummarizerService:
             side_effects=parsed.get("side_effects", []),
             calls=parsed.get("calls", []),
             called_by=parsed.get("called_by", []),
-            complexity=ComplexityLevel(
-                parsed.get("complexity", "medium")
-            ),
+            complexity=ComplexityLevel(parsed.get("complexity", "medium")),
             tags=parsed.get("tags", []),
             model_used=self._model,
         )

@@ -120,7 +120,7 @@ class EmbeddingService:
 
     def index_embeddings(
         self,
-        nodes: list[ASTNode],
+        nodes: "list[ASTNode]",  # noqa: F821
         batch_size: int = 32,
     ) -> int:
         """Index embeddings for a list of AST nodes.
