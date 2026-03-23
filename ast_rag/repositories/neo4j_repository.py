@@ -17,7 +17,7 @@ import logging
 from typing import Any, Optional
 from collections.abc import Iterable
 
-from neo4j import Driver, GraphDatabase, Session, Result
+from neo4j import Driver, GraphDatabase, Result
 
 from ast_rag.dto import ASTNode, ASTEdge, Neo4jConfig
 
@@ -35,11 +35,11 @@ class Neo4jRepository:
 
         config = Neo4jConfig(uri="bolt://localhost:7687", user="neo4j", password="password")
         repo = Neo4jRepository(config)
-        
+
         # Create a node
         node = ASTNode(...)
         repo.create_node(node)
-        
+
         # Query nodes
         results = repo.execute_query("MATCH (n:Function) RETURN n LIMIT 10")
 
@@ -775,7 +775,6 @@ ON (n.{property_name})
             if_not_exists: If True, skip if index already exists
         """
         if_not_exists_clause = "IF NOT EXISTS" if if_not_exists else ""
-        labels_str = ", ".join([f"`{l}`" for l in labels])
         props_str = ", ".join([f"n.{p}" for p in properties])
         query = f"""
 CREATE FULLTEXT INDEX {index_name} {if_not_exists_clause}

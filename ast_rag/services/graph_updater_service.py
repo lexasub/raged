@@ -128,7 +128,7 @@ def _nodes_to_batch_by_label(nodes: list[ASTNode]) -> dict[str, list[dict]]:
     """Group node property dicts by their Neo4j label."""
     by_label: dict[str, list[dict]] = {}
     for node in nodes:
-        label = _KIND_TO_LABEL.get(node.kind.value, "Class")
+        label = KIND_TO_LABEL.get(node.kind.value, "Class")
         by_label.setdefault(label, []).append(node.to_neo4j_props())
     return by_label
 
@@ -140,7 +140,7 @@ def _expired_nodes_by_label(ids: list[str], existing_nodes: list[ASTNode]) -> di
     for nid in ids:
         node = id_to_node.get(nid)
         if node:
-            label = _KIND_TO_LABEL.get(node.kind.value, "Class")
+            label = KIND_TO_LABEL.get(node.kind.value, "Class")
             by_label.setdefault(label, []).append(nid)
     return by_label
 
@@ -768,7 +768,7 @@ def extract_and_store_blocks(
         Tuple of (blocks, edges) where edges are CONTAINS_BLOCK relationships
     """
     from ast_rag.services.parsing.block_extractor import BlockExtractor
-    from ast_rag.models import ASTBlock, ASTEdge, EdgeKind
+    from ast_rag.models import ASTEdge, EdgeKind
 
     # Filter to only function/method nodes
     from ast_rag.models import NodeKind

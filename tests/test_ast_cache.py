@@ -32,6 +32,7 @@ from ast_rag.services.parsing.parser_manager import ParserManager
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _tmp(suffix: str, content: bytes) -> str:
     fh = tempfile.NamedTemporaryFile(suffix=suffix, delete=False, mode="wb")
     fh.write(content)
@@ -56,6 +57,7 @@ def _make_sentinel_tree():
 # ===========================================================================
 # Unit tests: LazyTree
 # ===========================================================================
+
 
 class TestLazyTree:
     """Test LazyTree without involving any real parsing or storage."""
@@ -131,6 +133,7 @@ class TestLazyTree:
 # ===========================================================================
 # Unit tests: ParseCache in complete isolation (no ParserManager, no tree-sitter)
 # ===========================================================================
+
 
 class TestParseCacheUnit:
     """Test ParseCache directly without involving any parsing."""
@@ -214,8 +217,8 @@ class TestParseCacheUnit:
     def test_stats_hit_rate_calculation(self):
         cache = ParseCache()
         cache.put("/f.py", b"src", _make_sentinel_tree())
-        cache.get("/f.py", b"src")   # HIT
-        cache.get("/f.py", b"other") # MISS (hash mismatch)
+        cache.get("/f.py", b"src")  # HIT
+        cache.get("/f.py", b"other")  # MISS (hash mismatch)
         s = cache.stats()
         assert s["hits"] == 1
         assert s["misses"] == 1
@@ -233,6 +236,7 @@ class TestParseCacheUnit:
 # ===========================================================================
 # Unit tests: SQLiteParseCache
 # ===========================================================================
+
 
 class TestSQLiteParseCache:
     """Test SQLiteParseCache — persistence, interface parity, and observability."""
@@ -268,6 +272,7 @@ class TestSQLiteParseCache:
             cache.put("/f.py", b"src", sentinel)
 
             resolved = []
+
             def loader():
                 resolved.append(1)
                 return sentinel
@@ -348,7 +353,7 @@ class TestSQLiteParseCache:
             sentinel = _make_sentinel_tree()
             cache = SQLiteParseCache(db)
             cache.put("/f.py", b"src", sentinel)
-            cache.get("/f.py", b"src", loader=lambda: sentinel)        # HIT
+            cache.get("/f.py", b"src", loader=lambda: sentinel)  # HIT
             cache.get("/f.py", b"different", loader=lambda: sentinel)  # MISS
             s = cache.stats()
             assert s["hits"] == 1
@@ -361,6 +366,7 @@ class TestSQLiteParseCache:
 # ===========================================================================
 # Integration tests: ParserManager with in-memory ParseCache
 # ===========================================================================
+
 
 class TestParserManagerIntegration:
     """Verify ParserManager delegates to ParseCache (no inline cache logic)."""
@@ -447,16 +453,21 @@ class TestParserManagerIntegration:
 # Integration tests: ParserManager with SQLiteParseCache
 # ===========================================================================
 
+
 class TestParserManagerSQLite:
     """ParserManager with SQLite backend — persistence across two instances."""
 
     def test_factory_creates_sqlite_cache_from_config(self):
         db = _tmp_db()
         try:
-            pm = ParserManager(config={"parse_cache": {
-                "persistence_enabled": True,
-                "db_path": db,
-            }})
+            pm = ParserManager(
+                config={
+                    "parse_cache": {
+                        "persistence_enabled": True,
+                        "db_path": db,
+                    }
+                }
+            )
             assert isinstance(pm._cache, SQLiteParseCache)
         finally:
             if os.path.exists(db):
@@ -493,6 +504,7 @@ class TestParserManagerSQLite:
 # ===========================================================================
 # Worker resolve tests: parse_file(resolve=True)
 # ===========================================================================
+
 
 class TestWorkerResolve:
     """parse_file(resolve=True) must return a plain Tree, not a LazyTree.

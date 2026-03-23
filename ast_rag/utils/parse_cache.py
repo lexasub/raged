@@ -47,7 +47,6 @@ from __future__ import annotations
 
 import hashlib
 import logging
-import os
 import sqlite3
 import time
 from typing import Any, Callable, Optional
@@ -60,6 +59,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # LazyTree
 # ---------------------------------------------------------------------------
+
 
 class LazyTree:
     """Thin proxy that defers tree loading until first attribute access.
@@ -139,6 +139,7 @@ class LazyTree:
 # ---------------------------------------------------------------------------
 # ParseCache  (in-memory, default backend)
 # ---------------------------------------------------------------------------
+
 
 class ParseCache:
     """Content-addressed in-memory cache for tree-sitter parse trees.
@@ -223,7 +224,7 @@ class ParseCache:
         content_hash = self.hash_source(source)
         # Create a no-op loader — tree is already available.
         lazy = LazyTree(loader=lambda t=tree: t)
-        object.__setattr__(lazy, "_tree", tree)   # pre-populate → eager
+        object.__setattr__(lazy, "_tree", tree)  # pre-populate → eager
         object.__setattr__(lazy, "_hash", content_hash)
         self._store[abs_path] = lazy
         logger.debug("ParseCache PUT : %s", abs_path)
@@ -309,9 +310,7 @@ class SQLiteParseCache:
         self._db_path = db_path
         self._hits: int = 0
         self._misses: int = 0
-        self._conn: sqlite3.Connection = sqlite3.connect(
-            db_path, check_same_thread=False
-        )
+        self._conn: sqlite3.Connection = sqlite3.connect(db_path, check_same_thread=False)
         self._conn.executescript(_SCHEMA)
         self._conn.commit()
         logger.debug("SQLiteParseCache opened: %s", db_path)
@@ -402,9 +401,7 @@ class SQLiteParseCache:
         Args:
             abs_path: Absolute path of the file to evict.
         """
-        cur = self._conn.execute(
-            "DELETE FROM parse_cache WHERE file_path = ?", (abs_path,)
-        )
+        cur = self._conn.execute("DELETE FROM parse_cache WHERE file_path = ?", (abs_path,))
         self._conn.commit()
         if cur.rowcount:
             logger.debug("SQLiteParseCache EVICT: %s", abs_path)

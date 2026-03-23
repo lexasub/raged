@@ -12,7 +12,9 @@ def test_update_project_dry_run():
         assert "warning" in result or "warning" not in result  # Depends on repo size
     except Exception as git_err:
         # Skip if not enough commits (e.g. only 1 commit in repo)
-        if "not enough parent commits" in str(git_err) or "did not resolve to an object" in str(git_err):
+        if "not enough parent commits" in str(git_err) or "did not resolve to an object" in str(
+            git_err
+        ):
             print(f"  Skipped: not enough commits in repo ({git_err})")
             return  # Test passes by skipping
         raise

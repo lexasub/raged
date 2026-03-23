@@ -29,6 +29,7 @@ print()
 
 results = {"passed": 0, "failed": 0, "tests": []}
 
+
 def test(name, condition, details=""):
     status = "✅ PASS" if condition else "❌ FAIL"
     results["tests"].append((name, status, details))
@@ -40,6 +41,7 @@ def test(name, condition, details=""):
     if details and not condition:
         print(f"          {details}")
 
+
 # ============================================================================
 # TEST 1: StandardResult Model
 # ============================================================================
@@ -50,6 +52,7 @@ print("=" * 80)
 print("\n1.1 StandardResult class exists...")
 try:
     from ast_rag.models import StandardResult
+
     result = StandardResult(
         id="test123",
         name="testMethod",
@@ -73,6 +76,7 @@ except Exception as e:
 print("\n1.2 ASTNode.to_standard_result()...")
 try:
     from ast_rag.models import ASTNode, NodeKind, Language
+
     node = ASTNode(
         id="node1",
         name="myFunction",
@@ -83,7 +87,7 @@ try:
         start_line=42,
         end_line=85,
         start_byte=1000,  # Required field
-        end_byte=2000,    # Required field
+        end_byte=2000,  # Required field
     )
     std_result = node.to_standard_result(score=0.9)
     test("to_standard_result() exists", std_result is not None)
@@ -97,7 +101,7 @@ try:
     # Check if MCP tools use StandardResult
     with open("ast_rag/ast_rag_mcp.py", "r") as f:
         content = f.read()
-    
+
     test("find_references uses StandardResult", "StandardResult" in content)
     test("semantic_search uses StandardResult", "StandardResult" in content)
     test("find_callers uses StandardResult", "StandardResult" in content)
@@ -117,9 +121,10 @@ print("\n2.1 compute_diff_for_commits has dry_run...")
 try:
     from ast_rag.services.graph_updater_service import compute_diff_for_commits
     import inspect
+
     sig = inspect.signature(compute_diff_for_commits)
     params = list(sig.parameters.keys())
-    
+
     test("dry_run parameter exists", "dry_run" in params)
     test("max_changed_nodes parameter exists", "max_changed_nodes" in params)
 
@@ -137,7 +142,9 @@ try:
         test("  - has 'exceeds_limit' key", "exceeds_limit" in result)
     except Exception as git_err:
         # Skip if not enough commits (e.g. only 1 commit in repo)
-        if "not enough parent commits" in str(git_err) or "did not resolve to an object" in str(git_err):
+        if "not enough parent commits" in str(git_err) or "did not resolve to an object" in str(
+            git_err
+        ):
             test("compute_diff_for_commits dry_run", True, "Skipped: not enough commits in repo")
         else:
             raise
@@ -148,6 +155,7 @@ print("\n2.2 update_project_dry_run MCP tool...")
 try:
     from ast_rag.ast_rag_mcp import update_project_dry_run
     import inspect
+
     sig = inspect.signature(update_project_dry_run)
     params = list(sig.parameters.keys())
 
@@ -163,10 +171,14 @@ try:
             max_changed_nodes=10000,
         )
         test("  - returns dict with stats", "stats" in result)
-        test("  - has warning if exceeded", "warning" in result or True)  # May or may not have warning
+        test(
+            "  - has warning if exceeded", "warning" in result or True
+        )  # May or may not have warning
     except Exception as git_err:
         # Skip if not enough commits (e.g. only 1 commit in repo)
-        if "not enough parent commits" in str(git_err) or "did not resolve to an object" in str(git_err):
+        if "not enough parent commits" in str(git_err) or "did not resolve to an object" in str(
+            git_err
+        ):
             test("update_project_dry_run", True, "Skipped: not enough commits in repo")
             test("  - skipped (git error)", True, str(git_err)[:100])
         else:
@@ -181,6 +193,7 @@ print("\n2.3 max_changed_nodes in update_project...")
 try:
     from ast_rag.ast_rag_mcp import update_project
     import inspect
+
     sig = inspect.signature(update_project)
     params = list(sig.parameters.keys())
 
@@ -194,7 +207,7 @@ print("\n2.4 Skip statistics logging...")
 try:
     with open("ast_rag/graph_updater.py", "r") as f:
         content = f.read()
-    
+
     test("Skip ratio logged", "skip" in content.lower() or "skipped" in content.lower())
     test("Statistics logged", "logger.info" in content)
 except Exception as e:
@@ -210,8 +223,9 @@ print("=" * 80)
 print("\n3.1 metrics module exists...")
 try:
     from ast_rag import metrics
+
     test("metrics module imports", True)
-    
+
     # Check metrics are defined
     test("SEARCH_LATENCY histogram", hasattr(metrics, "SEARCH_LATENCY"))
     test("FIND_DEFINITION_LATENCY", hasattr(metrics, "FIND_DEFINITION_LATENCY"))
@@ -231,7 +245,7 @@ print("\n3.2 Metrics integrated in ast_rag_api...")
 try:
     with open("ast_rag/ast_rag_api.py", "r") as f:
         content = f.read()
-    
+
     test("Imports metrics", "from ast_rag.metrics import" in content)
     test("Uses track_latency", "@track_latency" in content or "track_latency(" in content)
 except Exception as e:
@@ -241,7 +255,7 @@ print("\n3.3 Metrics integrated in graph_updater...")
 try:
     with open("ast_rag/graph_updater.py", "r") as f:
         content = f.read()
-    
+
     test("Imports metrics", "from ast_rag.metrics import" in content)
     test("Updates SKIP_RATIO", "SKIP_RATIO.set" in content)
     test("Updates UPDATE_TOTAL", "UPDATE_TOTAL.labels" in content)
@@ -252,7 +266,7 @@ print("\n3.4 Grafana dashboard template...")
 try:
     dashboard_path = Path("docs/grafana_dashboard.json")
     test("grafana_dashboard.json exists", dashboard_path.exists())
-    
+
     if dashboard_path.exists():
         with open(dashboard_path, "r") as f:
             dashboard = json.load(f)
@@ -273,10 +287,10 @@ print("\n4.1 CLI module structure...")
 try:
     with open("ast_rag/cli.py", "r") as f:
         content = f.read()
-    
-    test("Has refs command", "@app.command(\"refs\")" in content or "def refs(" in content)
-    test("Has symbol-impact command", "@app.command(\"symbol-impact\")" in content)
-    test("Has call-graph command", "@app.command(\"call-graph\")" in content)
+
+    test("Has refs command", '@app.command("refs")' in content or "def refs(" in content)
+    test("Has symbol-impact command", '@app.command("symbol-impact")' in content)
+    test("Has call-graph command", '@app.command("call-graph")' in content)
 except Exception as e:
     test("CLI module structure", False, str(e))
 
@@ -287,9 +301,9 @@ try:
         capture_output=True,
         text=True,
         timeout=10,
-        cwd=PROJECT_ROOT
+        cwd=PROJECT_ROOT,
     )
-    
+
     test("CLI --help works", result.returncode == 0)
     if result.returncode == 0:
         test("  - Shows refs", "refs" in result.stdout)
@@ -305,7 +319,7 @@ try:
         capture_output=True,
         text=True,
         timeout=10,
-        cwd=PROJECT_ROOT
+        cwd=PROJECT_ROOT,
     )
 
     test("refs --help works", result.returncode == 0)
@@ -334,7 +348,7 @@ try:
         capture_output=True,
         text=True,
         timeout=10,
-        cwd=PROJECT_ROOT
+        cwd=PROJECT_ROOT,
     )
 
     test("symbol-impact --help works", result.returncode == 0)
@@ -356,7 +370,7 @@ try:
         capture_output=True,
         text=True,
         timeout=10,
-        cwd=PROJECT_ROOT
+        cwd=PROJECT_ROOT,
     )
 
     test("call-graph --help works", result.returncode == 0)
@@ -381,6 +395,7 @@ print("=" * 80)
 print("\n5.1 INJECTS in EdgeKind enum...")
 try:
     from ast_rag.models import EdgeKind
+
     test("INJECTS exists", hasattr(EdgeKind, "INJECTS"))
     test("  - value is 'INJECTS'", EdgeKind.INJECTS.value == "INJECTS")
 except Exception as e:
@@ -389,10 +404,10 @@ except Exception as e:
 print("\n5.2 DI queries in language_queries...")
 try:
     from ast_rag.language_queries import JAVA_QUERIES
-    
+
     test("di_fields query exists", "di_fields" in JAVA_QUERIES)
     test("di_constructors query exists", "di_constructors" in JAVA_QUERIES)
-    
+
     # Check query content
     if "di_fields" in JAVA_QUERIES:
         query = JAVA_QUERIES["di_fields"]
@@ -410,7 +425,7 @@ try:
     # Check method exists
     has_method = hasattr(ParserManager, "_extract_injects")
     test("_extract_injects method exists", has_method)
-    
+
     if has_method:
         # Check it's called in extract_edges
         with open("ast_rag/ast_parser.py", "r") as f:
@@ -423,6 +438,7 @@ except Exception as e:
 print("\n5.4 DI queries compile...")
 try:
     from ast_rag.services.parsing.parser_manager import ParserManager
+
     pm = ParserManager()
 
     java_queries = pm._compiled_queries.get("java", {})

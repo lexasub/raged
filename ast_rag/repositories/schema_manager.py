@@ -17,7 +17,7 @@ import logging
 from pathlib import Path
 from typing import Any, Optional, List
 
-from neo4j import Driver, Session, Result
+from neo4j import Driver, Result
 
 from ast_rag.dto import Neo4jConfig
 
@@ -221,7 +221,7 @@ class SchemaManager:
 
         query_parts = [
             "CREATE INDEX",
-            f"IF NOT EXISTS" if if_not_exists else "",
+            "IF NOT EXISTS" if if_not_exists else "",
             f"{index_name}",
             f"FOR (n:{label})",
             f"ON (n.{property_name})",
@@ -280,11 +280,11 @@ class SchemaManager:
 
         query_parts = [
             "CREATE FULLTEXT INDEX",
-            f"IF NOT EXISTS" if if_not_exists else "",
+            "IF NOT EXISTS" if if_not_exists else "",
             f"{index_name}",
-            f"FOR",
+            "FOR",
             f"([{label_filters}])",
-            f"ON EACH",
+            "ON EACH",
             f"[{properties_str}]",
             f"OPTIONS {{ analyzer: '{analyzer}' }}",
         ]
@@ -348,7 +348,7 @@ class SchemaManager:
         Returns:
             True if index was dropped, False if it didn't exist
         """
-        query_parts = ["DROP INDEX", f"IF EXISTS" if if_exists else "", f"{index_name}"]
+        query_parts = ["DROP INDEX", "IF EXISTS" if if_exists else "", f"{index_name}"]
         query = " ".join(part for part in query_parts if part)
 
         try:
@@ -395,7 +395,6 @@ class SchemaManager:
                         "indexPopulation": record.get("indexPopulation"),
                         "entityType": record.get("entityType"),
                         "labelsOrTypes": record.get("labelsOrTypes"),
-                        "properties": record.get("properties"),
                     }
                 )
             return indexes
@@ -505,7 +504,7 @@ class SchemaManager:
         """
         query_parts = [
             "CREATE CONSTRAINT",
-            f"IF NOT EXISTS" if if_not_exists else "",
+            "IF NOT EXISTS" if if_not_exists else "",
             f"{constraint_name}",
             f"FOR (n:{label})",
             f"REQUIRE n.{property_name}",
@@ -542,7 +541,7 @@ class SchemaManager:
         Returns:
             True if constraint was dropped, False if it didn't exist
         """
-        query_parts = ["DROP CONSTRAINT", f"IF EXISTS" if if_exists else "", f"{constraint_name}"]
+        query_parts = ["DROP CONSTRAINT", "IF EXISTS" if if_exists else "", f"{constraint_name}"]
         query = " ".join(part for part in query_parts if part)
 
         try:
@@ -753,14 +752,8 @@ class SchemaManager:
             - indexes: List of index metadata
             - constraints: List of constraint metadata
         """
-        with self._driver.session() as session:
+        with self._driver.session() as _session:
             # Get node labels and counts
-            label_query = """
-            CALL db.labels() YIELD label
-            CALL apoc.cypher.run('MATCH (n:`' + label + '`) RETURN count(n) AS count', {}) YIELD value
-            RETURN label, value.count AS count
-            """
-            # Since we don't know if apoc is available, we'll do it differently
             labels_query = "CALL db.labels() YIELD label RETURN label"
             label_counts = {}
             for record in self._driver.session().run(labels_query):

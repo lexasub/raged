@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field
 
 class Language(str, Enum):
     """Supported languages for stack trace parsing."""
+
     PYTHON = "python"
     CPP = "cpp"
     JAVA = "java"
@@ -28,6 +29,7 @@ class Language(str, Enum):
 
 class FrameType(str, Enum):
     """Type of stack frame."""
+
     FUNCTION_CALL = "function_call"
     METHOD_CALL = "method_call"
     CONSTRUCTOR = "constructor"
@@ -38,7 +40,7 @@ class FrameType(str, Enum):
 
 class StackFrame(BaseModel):
     """Represents a single frame in a stack trace.
-    
+
     Attributes:
         frame_index: Position in the call stack (0 = topmost/innermost)
         function_name: Name of the function/method
@@ -56,6 +58,7 @@ class StackFrame(BaseModel):
         code_snippet: Source code snippet (populated after AST mapping)
         ast_node_id: AST node ID (populated after AST mapping)
     """
+
     frame_index: int
     function_name: str
     class_name: Optional[str] = None
@@ -72,7 +75,7 @@ class StackFrame(BaseModel):
     code_snippet: Optional[str] = None
     ast_node_id: Optional[str] = None
     ast_node_qualified_name: Optional[str] = None
-    
+
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
         return {
@@ -97,7 +100,7 @@ class StackFrame(BaseModel):
 
 class RootCause(BaseModel):
     """Analysis of the root cause of the error.
-    
+
     Attributes:
         error_type: Type/class of the error (e.g., NullPointerException)
         error_message: The error message text
@@ -108,6 +111,7 @@ class RootCause(BaseModel):
         confidence: Confidence score (0.0-1.0) in the analysis
         related_frames: Indices of frames related to the root cause
     """
+
     error_type: str
     error_message: str
     likely_cause: Optional[str] = None
@@ -116,7 +120,7 @@ class RootCause(BaseModel):
     suggested_fix: Optional[str] = None
     confidence: float = 0.0
     related_frames: list[int] = Field(default_factory=list)
-    
+
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
         return {
@@ -133,7 +137,7 @@ class RootCause(BaseModel):
 
 class SimilarIssue(BaseModel):
     """Represents a similar issue found in the codebase or knowledge base.
-    
+
     Attributes:
         issue_id: Unique identifier for the issue
         title: Issue title/description
@@ -143,6 +147,7 @@ class SimilarIssue(BaseModel):
         source: Source of the issue (internal, stackoverflow, github, etc.)
         url: Link to the issue (if available)
     """
+
     issue_id: str
     title: str
     location: Optional[str] = None
@@ -150,7 +155,7 @@ class SimilarIssue(BaseModel):
     resolution: Optional[str] = None
     source: str = "internal"
     url: Optional[str] = None
-    
+
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
         return {
@@ -166,9 +171,9 @@ class SimilarIssue(BaseModel):
 
 class StackTraceReport(BaseModel):
     """Complete analysis report for a stack trace.
-    
+
     This is the main output model for StackTraceService.analyze().
-    
+
     Attributes:
         error_type: Primary error type (e.g., NullPointerException)
         message: Full error message
@@ -181,6 +186,7 @@ class StackTraceReport(BaseModel):
         mapped_frames: Number of frames successfully mapped to AST
         analysis_metadata: Additional metadata about the analysis
     """
+
     error_type: str
     message: str
     language: Language = Language.UNKNOWN
@@ -191,7 +197,7 @@ class StackTraceReport(BaseModel):
     total_frames: int = 0
     mapped_frames: int = 0
     analysis_metadata: dict[str, Any] = Field(default_factory=dict)
-    
+
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
         return {
@@ -206,21 +212,24 @@ class StackTraceReport(BaseModel):
             "mapped_frames": self.mapped_frames,
             "analysis_metadata": self.analysis_metadata,
         }
-    
+
     def to_json(self, indent: int = 2) -> str:
         """Convert to JSON string."""
         import json
+
         return json.dumps(self.to_dict(), indent=indent, ensure_ascii=False)
-    
+
     def to_markdown(self) -> str:
         """Render as Markdown for chat display."""
         lines = []
-        lines.append(f"# Stack Trace Analysis Report\n")
+        lines.append("# Stack Trace Analysis Report\n")
         lines.append(f"## Error: `{self.error_type}`\n")
         lines.append(f"**Message:** {self.message}\n")
         lines.append(f"**Language:** {self.language.value}\n")
-        lines.append(f"**Total Frames:** {self.total_frames} ({self.mapped_frames} mapped to AST)\n")
-        
+        lines.append(
+            f"**Total Frames:** {self.total_frames} ({self.mapped_frames} mapped to AST)\n"
+        )
+
         if self.root_cause:
             lines.append("\n## Root Cause Analysis\n")
             lines.append(f"- **Type:** {self.root_cause.error_type}")
@@ -231,7 +240,7 @@ class StackTraceReport(BaseModel):
                 lines.append(f"- **Likely Cause:** {self.root_cause.likely_cause}")
             if self.root_cause.suggested_fix:
                 lines.append(f"- **Suggested Fix:** {self.root_cause.suggested_fix}")
-        
+
         if self.call_chain:
             lines.append("\n## Call Chain\n")
             for frame in self.call_chain[:10]:  # Show first 10
@@ -241,16 +250,16 @@ class StackTraceReport(BaseModel):
                 lines.append(f"{frame.frame_index}. `{frame.function_name}()`{loc}")
             if len(self.call_chain) > 10:
                 lines.append(f"... and {len(self.call_chain) - 10} more frames")
-        
+
         if self.similar_issues:
             lines.append("\n## Similar Issues\n")
             for issue in self.similar_issues[:5]:  # Show first 5
                 lines.append(f"- [{issue.similarity_score:.0%}] {issue.title}")
                 if issue.resolution:
                     lines.append(f"  - Resolution: {issue.resolution}")
-        
+
         if self.summary:
-            lines.append(f"\n## Summary\n")
+            lines.append("\n## Summary\n")
             lines.append(self.summary)
-        
+
         return "\n".join(lines)

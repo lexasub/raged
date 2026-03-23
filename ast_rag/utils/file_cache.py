@@ -41,7 +41,7 @@ def _get_git_hash(file_path: str, repo_path: str = ".") -> Optional[str]:
             ["git", "-C", repo_path, "ls-files", "-s", file_path],
             capture_output=True,
             text=True,
-            timeout=5
+            timeout=5,
         )
         if result.returncode == 0 and result.stdout.strip():
             # Format: "mode hash stage path"
@@ -88,7 +88,7 @@ class FileCache:
             result = subprocess.run(
                 ["git", "-C", self.root_path, "rev-parse", "--git-dir"],
                 capture_output=True,
-                timeout=5
+                timeout=5,
             )
             if result.returncode == 0:
                 self._git_repo = self.root_path

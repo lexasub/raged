@@ -27,28 +27,28 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 DEFAULT_COMMANDS: dict[str, str] = {
-    "java":       "mvn test -B --no-transfer-progress",
-    "cpp":        "cmake --build /workspace/build && cd /workspace/build && ctest --output-on-failure",
-    "rust":       "cargo test",
-    "python":     "pytest --tb=short -q",
+    "java": "mvn test -B --no-transfer-progress",
+    "cpp": "cmake --build /workspace/build && cd /workspace/build && ctest --output-on-failure",
+    "rust": "cargo test",
+    "python": "pytest --tb=short -q",
     "typescript": "npm test",
 }
 
 # Docker images to use per language
 # NOTE: these are public Docker Hub images; pin versions in production.
 _DOCKER_IMAGES: dict[str, str] = {
-    "java":       "maven:3.9-eclipse-temurin-21",
-    "cpp":        "gcc:13",
-    "rust":       "rust:1.76",
-    "python":     "python:3.12-slim",
+    "java": "maven:3.9-eclipse-temurin-21",
+    "cpp": "gcc:13",
+    "rust": "rust:1.76",
+    "python": "python:3.12-slim",
     "typescript": "node:20-slim",
 }
 
 # Resource constraints
-_MEM_LIMIT = "512m"    # maximum RAM per container
+_MEM_LIMIT = "512m"  # maximum RAM per container
 _CPU_PERIOD = 100_000  # microseconds
-_CPU_QUOTA  = 50_000   # 0.5 CPU cores
-_TIMEOUT    = 300      # seconds before we kill the container
+_CPU_QUOTA = 50_000  # 0.5 CPU cores
+_TIMEOUT = 300  # seconds before we kill the container
 
 
 def run_in_sandbox(
@@ -89,7 +89,9 @@ def run_in_sandbox(
 
     client = docker.from_env()
 
-    logger.info("Sandbox: lang=%s image=%s command=%r workdir=%s", lang, image, command, abs_workdir)
+    logger.info(
+        "Sandbox: lang=%s image=%s command=%r workdir=%s", lang, image, command, abs_workdir
+    )
 
     try:
         container = client.containers.run(
@@ -122,8 +124,11 @@ def run_in_sandbox(
 
     except docker.errors.ContainerError as exc:
         # Non-zero exit code
-        stdout_text = exc.container.logs(stdout=True, stderr=False).decode("utf-8", errors="replace") \
-            if exc.container else ""
+        stdout_text = (
+            exc.container.logs(stdout=True, stderr=False).decode("utf-8", errors="replace")
+            if exc.container
+            else ""
+        )
         stderr_text = exc.stderr.decode("utf-8", errors="replace") if exc.stderr else str(exc)
         return stdout_text, stderr_text, exc.exit_status
 

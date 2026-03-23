@@ -76,6 +76,7 @@ async def _startup() -> None:
 # Request / Response models
 # ---------------------------------------------------------------------------
 
+
 class EmbedRequest(BaseModel):
     texts: list[str] = Field(..., min_length=1, description="Texts to embed")
     normalize: bool = Field(True, description="L2-normalize output vectors")
@@ -98,6 +99,7 @@ class HealthResponse(BaseModel):
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
+
 
 @app.get("/health", response_model=HealthResponse)
 async def health() -> HealthResponse:
@@ -147,6 +149,7 @@ async def embed(request: EmbedRequest) -> EmbedResponse:
 # CLI entry point
 # ---------------------------------------------------------------------------
 
+
 def main() -> None:
     """Run the embedding server from the command line.
 
@@ -156,11 +159,11 @@ def main() -> None:
     import argparse
 
     parser = argparse.ArgumentParser(description="AST-RAG embedding HTTP server")
-    parser.add_argument("--model",  default="BAAI/bge-m3",  help="HuggingFace model name")
-    parser.add_argument("--device", default="cuda",          help="Torch device (cuda/cpu)")
-    parser.add_argument("--host",   default="0.0.0.0",       help="Bind host")
-    parser.add_argument("--port",   type=int, default=8765,  help="Port to listen on")
-    parser.add_argument("--workers", type=int, default=1,    help="Number of uvicorn workers")
+    parser.add_argument("--model", default="BAAI/bge-m3", help="HuggingFace model name")
+    parser.add_argument("--device", default="cuda", help="Torch device (cuda/cpu)")
+    parser.add_argument("--host", default="0.0.0.0", help="Bind host")
+    parser.add_argument("--port", type=int, default=8765, help="Port to listen on")
+    parser.add_argument("--workers", type=int, default=1, help="Number of uvicorn workers")
     args = parser.parse_args()
 
     # Push config into module-level globals before startup

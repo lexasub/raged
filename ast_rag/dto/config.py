@@ -20,6 +20,7 @@ class Neo4jConfig(BaseModel):
         database: Database name (Community Edition: always "neo4j")
         project_id: Project identifier for data isolation (prefix-based)
     """
+
     uri: str = "bolt://localhost:7687"
     user: str = "neo4j"
     password: str = "password"
@@ -35,6 +36,7 @@ class QdrantConfig(BaseModel):
         collection_name: Collection name for embeddings
         local_path: If set, use local file mode instead of server
     """
+
     url: str = "http://localhost:6333"
     collection_name: str = "ast_rag_nodes"
     local_path: Optional[str] = None
@@ -53,6 +55,7 @@ class EmbeddingConfig(BaseModel):
         vector_weight: Weight for vector similarity scores
         keyword_weight: Weight for keyword search scores
     """
+
     model_name: str = "BAAI/bge-m3"
     device: str = "cpu"
     remote_url: Optional[str] = None
@@ -73,6 +76,7 @@ class ProjectConfig(BaseModel):
         language_extensions: File extensions per language
         exclude_patterns: Patterns to exclude during indexing
     """
+
     neo4j: Neo4jConfig = Field(default_factory=Neo4jConfig)
     qdrant: QdrantConfig = Field(default_factory=QdrantConfig)
     embedding: EmbeddingConfig = Field(default_factory=EmbeddingConfig)
@@ -87,7 +91,16 @@ class ProjectConfig(BaseModel):
     )
     exclude_patterns: list[str] = Field(
         default_factory=lambda: [
-            ".git", "__pycache__", "node_modules", "target", "build", "dist",
-            ".gradle", ".idea", ".vscode", "venv", ".venv",
+            ".git",
+            "__pycache__",
+            "node_modules",
+            "target",
+            "build",
+            "dist",
+            ".gradle",
+            ".idea",
+            ".vscode",
+            "venv",
+            ".venv",
         ]
     )

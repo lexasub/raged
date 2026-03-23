@@ -69,7 +69,7 @@ class ParsingService:
             ValueError: If the language is not supported
         """
         file_path_str = str(file_path)
-        
+
         # Check if file exists
         if not os.path.exists(file_path_str):
             raise FileNotFoundError(f"File not found: {file_path_str}")
@@ -138,7 +138,7 @@ class ParsingService:
             Tuple of (nodes, edges) extracted from all files
         """
         dir_path_str = str(dir_path)
-        
+
         if not os.path.isdir(dir_path_str):
             raise ValueError(f"Directory not found: {dir_path_str}")
 
@@ -156,16 +156,19 @@ class ParsingService:
 
         # Filter by language if specified
         if lang:
-            source_files = [(f, l) for f, l in source_files if l == lang]
+            source_files = [(f, lang_val) for f, lang_val in source_files if lang_val == lang]
 
         # Apply exclude patterns
         if self._exclude_patterns:
             import fnmatch
+
             filtered_files = []
             for fpath, file_lang in source_files:
                 excluded = False
                 for pattern in self._exclude_patterns:
-                    if fnmatch.fnmatch(fpath, pattern) or fnmatch.fnmatch(os.path.basename(fpath), pattern):
+                    if fnmatch.fnmatch(fpath, pattern) or fnmatch.fnmatch(
+                        os.path.basename(fpath), pattern
+                    ):
                         excluded = True
                         break
                 if not excluded:
