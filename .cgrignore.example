@@ -1,0 +1,41 @@
+# .cgrignore — files and directories to exclude from AST-RAG indexing.
+# Copy to .cgrignore in your project root; format is the same as .gitignore.
+
+# Version control
+.git/
+.svn/
+.hg/
+
+# Build artifacts
+build/
+dist/
+target/
+*.o
+*.so
+*.dll
+*.pyc
+*.pyo
+*.class
+
+# Dependencies
+node_modules/
+vendor/
+__pycache__/
+venv/
+.venv/
+env/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Generated code (uncomment if needed)
+# **/generated/**
+# *_pb2.py
+
+# Test fixtures (uncomment if needed)
+# tests/fixtures/
+# tests/data/

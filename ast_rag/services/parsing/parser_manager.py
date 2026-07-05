@@ -35,6 +35,7 @@ from ast_rag.services.parsing.node_extractor import NodeExtractor
 from ast_rag.services.parsing.edge_extractor import EdgeExtractor
 from ast_rag.utils.parse_cache import ParseCache, SQLiteParseCache
 from ast_rag.utils.bounded_ast_cache import BoundedParseCache
+from ast_rag.utils.ignore_parser import CgrIgnoreParser
 
 logger = logging.getLogger(__name__)
 
@@ -280,7 +281,24 @@ class ParserManager:
 def walk_source_files(
     root: str,
     exclude_dirs: Optional[list[str]] = None,
+    ignore_file: Optional[str] = None,
 ) -> list[tuple[str, str]]:
+    """Recursively enumerate source files under root.
+
+    Exclusion rules, applied together:
+    - ``exclude_dirs``: exact directory names to prune (legacy behavior).
+    - Hidden directories (name starts with ``.``) are always pruned.
+    - ``.cgrignore`` gitignore-style patterns, loaded from ``ignore_file``
+      or ``<root>/.cgrignore``; defaults apply when neither exists.
+
+    Args:
+        root: Root directory to walk.
+        exclude_dirs: Directory names to exclude (kept for compatibility).
+        ignore_file: Path to a .cgrignore-style file (default: root/.cgrignore).
+
+    Returns:
+        List of (absolute_file_path, language) tuples.
+    """
     if exclude_dirs is None:
         exclude_dirs = [
             ".git",
@@ -293,12 +311,27 @@ def walk_source_files(
             ".idea",
             ".vscode",
         ]
+    ignore_parser = CgrIgnoreParser(root)
+    ignore_parser.load(ignore_file)
+
     result: list[tuple[str, str]] = []
     for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = [d for d in dirnames if d not in exclude_dirs and not d.startswith(".")]
+        dirnames[:] = [
+            d
+            for d in dirnames
+            if d not in exclude_dirs
+            and not d.startswith(".")
+            and not ignore_parser.should_ignore(
+                os.path.abspath(os.path.join(dirpath, d)), is_dir=True
+            )
+        ]
         for fname in filenames:
             ext = Path(fname).suffix.lower()
             lang = EXT_TO_LANG.get(ext)
-            if lang:
-                result.append((os.path.join(dirpath, fname), lang))
+            if lang is None:
+                continue
+            file_path = os.path.join(dirpath, fname)
+            if ignore_parser.should_ignore(os.path.abspath(file_path)):
+                continue
+            result.append((file_path, lang))
     return result

@@ -92,6 +92,8 @@ class ProjectConfig(BaseModel):
         parse_cache: Parse cache configuration
         language_extensions: File extensions per language
         exclude_patterns: Patterns to exclude during indexing
+        ignore_file: Path to a .cgrignore-style ignore file
+            (default: .cgrignore in the indexed root)
     """
 
     neo4j: Neo4jConfig = Field(default_factory=Neo4jConfig)
@@ -122,3 +124,4 @@ class ProjectConfig(BaseModel):
             ".venv",
         ]
     )
+    ignore_file: Optional[str] = None

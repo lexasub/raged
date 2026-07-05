@@ -149,7 +149,9 @@ def index_project(
 
     # Parse all source files
     pm = ParserManager(project_id=cfg.neo4j.project_id)
-    files = list(walk_source_files(root, exclude_dirs=cfg.exclude_patterns))
+    files = list(
+        walk_source_files(root, exclude_dirs=cfg.exclude_patterns, ignore_file=cfg.ignore_file)
+    )
 
     all_nodes = []
     all_edges = []

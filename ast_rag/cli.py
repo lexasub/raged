@@ -105,6 +105,12 @@ def init(
     cache_memory_mb: Optional[int] = typer.Option(
         None, "--cache-memory-mb", help="Max parse cache memory in MB (overrides config)"
     ),
+    ignore_file: Optional[str] = typer.Option(
+        None,
+        "--ignore-file",
+        "-i",
+        help="Path to a .cgrignore-style ignore file (default: .cgrignore in PATH)",
+    ),
     verbose: bool = typer.Option(False, "--verbose", "-v"),
 ) -> None:
     """Perform a full initial indexing of the codebase at PATH."""
@@ -133,7 +139,11 @@ def init(
         project_id=cfg.neo4j.project_id,
         config={"parse_cache": pc_cfg},
     )
-    files = walk_source_files(root, exclude_dirs=cfg.exclude_patterns)
+    files = walk_source_files(
+        root,
+        exclude_dirs=cfg.exclude_patterns,
+        ignore_file=ignore_file or cfg.ignore_file,
+    )
     console.print(f"Found [bold]{len(files)}[/bold] source files.")
 
     all_nodes = []

@@ -90,6 +90,7 @@ ast-rag evaluate --all
 |----------|----------|
 | [docs/QUICKSTART.md](docs/QUICKSTART.md) | ⭐ **Start here** — detailed quick start |
 | [docs/configuration.md](docs/configuration.md) | Configuration and troubleshooting |
+| [docs/IGNORE_FILES.md](docs/IGNORE_FILES.md) | Excluding files from indexing (`.cgrignore`) |
 | [docs/python-api.md](docs/python-api.md) | Python API for scripts |
 | [docs/graph-schema.md](docs/graph-schema.md) | Neo4j graph schema |
 | [AGENTS.md](AGENTS.md) | Guide for AI agents |
