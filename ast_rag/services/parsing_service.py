@@ -11,7 +11,11 @@ from pathlib import Path
 from typing import Optional
 
 from ast_rag.dto import ASTNode, ASTEdge, Language
-from ast_rag.services.parsing.parser_manager import ParserManager, walk_source_files
+from ast_rag.services.parsing.parser_manager import (
+    ParserManager,
+    format_supported_languages,
+    walk_source_files,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -78,7 +82,11 @@ class ParsingService:
         if lang is None:
             lang = self._parser_manager.detect_language(file_path_str)
             if lang is None:
-                raise ValueError(f"Could not detect language for file: {file_path_str}")
+                ext = Path(file_path_str).suffix or "<none>"
+                raise ValueError(
+                    f"Unsupported file extension '{ext}' for file: {file_path_str}. "
+                    f"Supported languages: {format_supported_languages()}"
+                )
 
         # Parse the file
         tree = self._parser_manager.parse_file(file_path_str)

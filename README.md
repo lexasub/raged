@@ -18,13 +18,15 @@ Context-aware code intelligence system for AI agents and developers. Provides se
 
 ## 🌐 Supported Languages
 
-| Language | Depth | Features |
-|----------|-------|----------|
-| **Java** | ⭐⭐⭐ Full | Classes, interfaces, methods, DI, inheritance, overrides |
-| **C++** | ⭐⭐⭐ Full | Classes, templates, virtual calls, lambdas |
-| **Rust** | ⭐⭐⭐ Full | Structs, traits, impls, generics, macros |
-| **Python** | ⭐⭐ Good | Classes, functions, imports, type hints |
-| **TypeScript** | ⭐⭐ Good | Classes, interfaces, functions, imports |
+| Language | Extensions | Depth | Features |
+|----------|------------|-------|----------|
+| **Java** | `.java` | ⭐⭐⭐ Full | Classes, interfaces, methods, DI, inheritance, overrides |
+| **C++** | `.cpp` `.cxx` `.cc` `.c` `.hpp` `.hxx` `.hh` `.h` | ⭐⭐⭐ Full | Classes, templates, virtual calls, lambdas |
+| **Rust** | `.rs` | ⭐⭐⭐ Full | Structs, traits, impls, generics, macros |
+| **Python** | `.py` | ⭐⭐ Good | Classes, functions, imports, type hints |
+| **TypeScript** | `.ts` `.tsx` | ⭐⭐ Good | Classes, interfaces, functions, imports |
+
+Files with other extensions are skipped during indexing with a warning listing the supported languages.
 
 ## 📦 Installation
 

@@ -55,6 +55,23 @@ EXT_TO_LANG: dict[str, str] = {
 }
 
 
+def supported_extensions() -> dict[str, list[str]]:
+    """Return a mapping of language name -> sorted list of file extensions."""
+    result: dict[str, list[str]] = {}
+    for ext, lang in EXT_TO_LANG.items():
+        result.setdefault(lang, []).append(ext)
+    return {lang: sorted(exts) for lang, exts in sorted(result.items())}
+
+
+def format_supported_languages() -> str:
+    """Human-readable list of supported languages and their extensions.
+
+    Example: ``cpp (.c, .cc, ...), java (.java), python (.py), ...`` —
+    meant for error and log messages when an unsupported file is seen.
+    """
+    return ", ".join(f"{lang} ({', '.join(exts)})" for lang, exts in supported_extensions().items())
+
+
 class ParserManager:
     """Loads and caches tree-sitter parsers and compiled queries per language.
 
@@ -149,6 +166,13 @@ class ParserManager:
     ) -> Optional[Tree]:
         lang = self.detect_language(file_path)
         if lang is None:
+            ext = Path(file_path).suffix or "<none>"
+            logger.warning(
+                "Skipping '%s': unsupported file extension '%s'. Supported languages: %s",
+                file_path,
+                ext,
+                format_supported_languages(),
+            )
             return None
 
         abs_path = os.path.abspath(file_path)
