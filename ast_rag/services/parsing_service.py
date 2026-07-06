@@ -88,17 +88,22 @@ class ParsingService:
                     f"Supported languages: {format_supported_languages()}"
                 )
 
-        # Parse the file
-        tree = self._parser_manager.parse_file(file_path_str)
-        if tree is None:
-            raise ValueError(f"Failed to parse file: {file_path_str}")
-
-        # Read source for extraction
+        # Read source once: used for the empty check, parsing, and extraction
         try:
             with open(file_path_str, "rb") as f:
                 source = f.read()
         except OSError as exc:
             raise ValueError(f"Could not read file {file_path_str}: {exc}") from exc
+
+        # Skip empty (or whitespace-only) files gracefully
+        if not source.strip():
+            logger.warning("Skipping empty file: %s", file_path_str)
+            return [], []
+
+        # Parse the file
+        tree = self._parser_manager.parse_file(file_path_str, source=source)
+        if tree is None:
+            raise ValueError(f"Failed to parse file: {file_path_str}")
 
         # Extract nodes and edges
         nodes = self._parser_manager.extract_nodes(

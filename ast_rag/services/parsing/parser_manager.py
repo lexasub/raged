@@ -185,6 +185,13 @@ class ParserManager:
             except OSError as exc:
                 logger.error("Cannot read '%s': %s", file_path, exc)
                 return None
+            # Skip empty (or whitespace-only) files: nothing to extract.
+            # Only applies when the source comes from disk — callers that pass
+            # ``source=`` explicitly (e.g. the git updater diffing an emptied
+            # file against its old version) still get a valid empty tree.
+            if not source.strip():
+                logger.warning("Skipping empty file '%s'", file_path)
+                return None
 
         if old_tree is None:
             _lang = lang
