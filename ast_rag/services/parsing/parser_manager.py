@@ -7,7 +7,7 @@ Responsibilities:
 - Extract ASTNode and ASTEdge objects via per-language tree-sitter queries.
 
 Full extraction: Java, C++.
-Skeletal extraction: Rust, Python, TypeScript.
+Skeletal extraction: Rust, Python, TypeScript, TSX/JSX.
 """
 
 from __future__ import annotations
@@ -52,7 +52,8 @@ EXT_TO_LANG: dict[str, str] = {
     ".rs": "rust",
     ".py": "python",
     ".ts": "typescript",
-    ".tsx": "typescript",
+    ".tsx": "tsx",
+    ".jsx": "tsx",
 }
 
 
@@ -140,6 +141,7 @@ class ParserManager:
             "rust": ts.Language(tsrust.language()),
             "python": ts.Language(tspython.language()),
             "typescript": ts.Language(tsts.language_typescript()),
+            "tsx": ts.Language(tsts.language_tsx()),
         }
         for name, lang in lang_defs.items():
             self._languages[name] = lang

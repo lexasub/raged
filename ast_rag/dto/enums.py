@@ -70,6 +70,7 @@ class Language(str, Enum):
     RUST = "rust"
     PYTHON = "python"
     TYPESCRIPT = "typescript"
+    TSX = "tsx"
 
 
 class BlockType(str, Enum):

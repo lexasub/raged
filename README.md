@@ -24,7 +24,8 @@ Context-aware code intelligence system for AI agents and developers. Provides se
 | **C++** | `.cpp` `.cxx` `.cc` `.c` `.hpp` `.hxx` `.hh` `.h` | ⭐⭐⭐ Full | Classes, templates, virtual calls, lambdas |
 | **Rust** | `.rs` | ⭐⭐⭐ Full | Structs, traits, impls, generics, macros |
 | **Python** | `.py` | ⭐⭐ Good | Classes, functions, imports, type hints |
-| **TypeScript** | `.ts` `.tsx` | ⭐⭐ Good | Classes, interfaces, functions, imports |
+| **TypeScript** | `.ts` | ⭐⭐ Good | Classes, interfaces, functions, imports |
+| **TSX / JSX** | `.tsx` `.jsx` | ⭐⭐ Good | Classes, interfaces, functions, imports, JSX elements |
 
 Files with other extensions are skipped during indexing with a warning listing the supported languages.
 
