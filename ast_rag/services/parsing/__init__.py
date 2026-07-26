@@ -18,6 +18,9 @@ LANGUAGE_QUERIES: dict[str, dict[str, str]] = {
     "rust": RUST_QUERIES,
     "python": PYTHON_QUERIES,
     "typescript": TYPESCRIPT_QUERIES,
+    # TSX grammar is a superset of TypeScript's (adds JSX nodes), so the
+    # existing TypeScript queries apply unchanged.
+    "tsx": TYPESCRIPT_QUERIES,
 }
 
 from ast_rag.services.parsing.block_extractor import BlockExtractor  # noqa: E402
