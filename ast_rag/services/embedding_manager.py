@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import logging
 import uuid
-from typing import Optional
+from typing import Callable, Optional
 
 import numpy as np
 from neo4j import Driver
@@ -279,13 +279,23 @@ class EmbeddingManager:
         self,
         nodes: list[ASTNode],
         batch_size: int = 64,
+        progress_callback: Optional[Callable[[int, int], None]] = None,
     ) -> int:
         """Build embeddings for all embeddable nodes (bulk).
+
+        Args:
+            nodes: Nodes to consider; non-embeddable kinds are skipped.
+            batch_size: Nodes encoded per batch.
+            progress_callback: Optional ``fn(done, total)`` invoked after each
+                batch. Embedding a large repository is the slowest phase of
+                indexing, so callers need a way to report progress.
 
         Returns the number of nodes indexed.
         """
         to_embed = [n for n in nodes if n.kind in EMBEDDABLE_KINDS]
         if not to_embed:
+            if progress_callback:
+                progress_callback(0, 0)
             return 0
 
         logger.info("Building embeddings for %d nodes...", len(to_embed))
@@ -308,6 +318,8 @@ class EmbeddingManager:
             ]
             client.upsert(collection_name=name, points=points, wait=True)
             count += len(batch)
+            if progress_callback:
+                progress_callback(count, len(to_embed))
             logger.debug(
                 "Embedded batch %d/%d",
                 i // batch_size + 1,
