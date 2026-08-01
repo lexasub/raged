@@ -205,9 +205,7 @@ class BlockExtractor:
         # Anchor the walk on the function's own subtree. Starting from the tree
         # root and pruning "outside the function" aborts immediately, because the
         # root spans the whole file and so never satisfies that range check.
-        func_subtree = root_node.descendant_for_byte_range(
-            func_node.start_byte, func_node.end_byte
-        )
+        func_subtree = root_node.descendant_for_byte_range(func_node.start_byte, func_node.end_byte)
         if func_subtree is None:
             return blocks
 
