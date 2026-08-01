@@ -20,6 +20,7 @@ from typing import Optional, Union
 import tree_sitter_cpp as tscpp
 import tree_sitter_java as tsjava
 import tree_sitter_rust as tsrust
+import tree_sitter_go as tsgo
 import tree_sitter_python as tspython
 import tree_sitter_typescript as tsts
 import tree_sitter as ts
@@ -50,6 +51,7 @@ EXT_TO_LANG: dict[str, str] = {
     ".h": "cpp",
     ".java": "java",
     ".rs": "rust",
+    ".go": "go",
     ".py": "python",
     ".ts": "typescript",
     ".tsx": "tsx",
@@ -139,6 +141,7 @@ class ParserManager:
             "cpp": ts.Language(tscpp.language()),
             "java": ts.Language(tsjava.language()),
             "rust": ts.Language(tsrust.language()),
+            "go": ts.Language(tsgo.language()),
             "python": ts.Language(tspython.language()),
             "typescript": ts.Language(tsts.language_typescript()),
             "tsx": ts.Language(tsts.language_tsx()),

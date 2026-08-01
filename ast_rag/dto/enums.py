@@ -71,6 +71,7 @@ class Language(str, Enum):
     PYTHON = "python"
     TYPESCRIPT = "typescript"
     TSX = "tsx"
+    GO = "go"
 
 
 class BlockType(str, Enum):

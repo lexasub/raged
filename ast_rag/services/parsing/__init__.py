@@ -11,6 +11,7 @@ from ast_rag.services.parsing.cpp import CPP_QUERIES
 from ast_rag.services.parsing.rust import RUST_QUERIES
 from ast_rag.services.parsing.python import PYTHON_QUERIES
 from ast_rag.services.parsing.typescript import TYPESCRIPT_QUERIES
+from ast_rag.services.parsing.go import GO_QUERIES
 
 LANGUAGE_QUERIES: dict[str, dict[str, str]] = {
     "java": JAVA_QUERIES,
@@ -18,6 +19,7 @@ LANGUAGE_QUERIES: dict[str, dict[str, str]] = {
     "rust": RUST_QUERIES,
     "python": PYTHON_QUERIES,
     "typescript": TYPESCRIPT_QUERIES,
+    "go": GO_QUERIES,
     # TSX grammar is a superset of TypeScript's (adds JSX nodes), so the
     # existing TypeScript queries apply unchanged.
     "tsx": TYPESCRIPT_QUERIES,
@@ -35,6 +37,7 @@ __all__ = [
     "RUST_QUERIES",
     "PYTHON_QUERIES",
     "TYPESCRIPT_QUERIES",
+    "GO_QUERIES",
     "BlockExtractor",
     "ParserManager",
     "NodeExtractor",
