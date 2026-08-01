@@ -17,6 +17,7 @@ dependencies = [
     "tree-sitter-rust>=0.23",
     "tree-sitter-python>=0.23",
     "tree-sitter-typescript>=0.23",
+    "tree-sitter-go>=0.23",
     # Graph database
     "neo4j>=5.14",
     # Vector store (Qdrant — Python 3.14 compatible)

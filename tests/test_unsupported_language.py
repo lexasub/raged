@@ -65,12 +65,12 @@ class TestSupportedExtensionsHelpers:
 
 class TestParserManagerUnsupported:
     def test_returns_none_and_warns(self, pm: ParserManager, tmp_path: Path, caplog) -> None:
-        path = tmp_path / "main.go"
-        path.write_text("package main\n", encoding="utf-8")
+        path = tmp_path / "main.rb"
+        path.write_text("puts 1\n", encoding="utf-8")
         with caplog.at_level("WARNING"):
             assert pm.parse_file(str(path)) is None
         messages = [rec.message for rec in caplog.records]
-        assert any(".go" in m and "Supported languages" in m for m in messages)
+        assert any(".rb" in m and "Supported languages" in m for m in messages)
 
     def test_extension_less_file_warns(self, pm: ParserManager, tmp_path: Path, caplog) -> None:
         path = tmp_path / "Makefile"
@@ -95,12 +95,12 @@ class TestParserManagerUnsupported:
 class TestParsingServiceUnsupported:
     def test_value_error_lists_supported_languages(self, tmp_path: Path) -> None:
         service = ParsingService()
-        path = tmp_path / "main.go"
-        path.write_text("package main\n", encoding="utf-8")
+        path = tmp_path / "main.rb"
+        path.write_text("puts 1\n", encoding="utf-8")
         with pytest.raises(ValueError) as exc_info:
             service.parse_file(str(path))
         message = str(exc_info.value)
-        assert "'.go'" in message
+        assert "'.rb'" in message
         assert "Supported languages" in message
         assert "java" in message
 
