@@ -1806,5 +1806,116 @@ def cache_stats(
     console.rule("[bold green]Done[/bold green]")
 
 
+# ---------------------------------------------------------------------------
+
+
+def _collect_index_stats(driver) -> dict:
+    """Gather node/edge/language/file counts from the graph.
+
+    Edges are stored as generic ``:EDGE`` relationships carrying the semantic
+    type in a ``kind`` property (see ``repositories.queries.batch_upsert_edges``),
+    so edge types are grouped by that property rather than by relationship type.
+    """
+    stats: dict = {
+        "nodes": {"total": 0, "by_kind": {}},
+        "edges": {"total": 0, "by_kind": {}},
+        "languages": {},
+        "files": 0,
+    }
+
+    with driver.session() as session:
+        # CurrentVersion is the graph's bookkeeping pointer, not a code node.
+        for record in session.run(
+            "MATCH (n) WHERE n.id IS NOT NULL AND NOT n:CurrentVersion "
+            "RETURN labels(n)[0] AS kind, count(*) AS n ORDER BY n DESC"
+        ):
+            stats["nodes"]["by_kind"][record["kind"] or "unlabelled"] = record["n"]
+        stats["nodes"]["total"] = sum(stats["nodes"]["by_kind"].values())
+
+        for record in session.run(
+            "MATCH ()-[r]->() RETURN coalesce(r.kind, type(r)) AS kind, "
+            "count(*) AS n ORDER BY n DESC"
+        ):
+            stats["edges"]["by_kind"][record["kind"]] = record["n"]
+        stats["edges"]["total"] = sum(stats["edges"]["by_kind"].values())
+
+        for record in session.run(
+            "MATCH (n) WHERE n.lang IS NOT NULL "
+            "RETURN n.lang AS lang, count(*) AS n ORDER BY n DESC"
+        ):
+            stats["languages"][record["lang"]] = record["n"]
+
+        record = session.run(
+            "MATCH (n) WHERE n.file_path IS NOT NULL RETURN count(DISTINCT n.file_path) AS files"
+        ).single()
+        stats["files"] = record["files"] if record else 0
+
+    return stats
+
+
+@app.command("stats")
+def stats(
+    config: Optional[str] = typer.Option(None, "--config", "-c", help="Path to config JSON"),
+    as_json: bool = typer.Option(False, "--json", help="Emit JSON instead of a table"),
+    verbose: bool = typer.Option(False, "--verbose", "-v"),
+) -> None:
+    """
+    Show statistics about the indexed codebase.
+
+    Reports node counts by kind, edge counts by type, the language
+    distribution and the number of indexed files.
+
+    Examples:
+
+      ast-rag stats
+      ast-rag stats --json
+      ast-rag stats --config ast_rag_config.json
+    """
+    if verbose:
+        logging.basicConfig(level=logging.DEBUG)
+    else:
+        logging.basicConfig(level=logging.WARNING)
+
+    cfg = _load_config(config)
+    driver = create_driver(cfg.neo4j)
+    try:
+        data = _collect_index_stats(driver)
+    finally:
+        driver.close()
+
+    if as_json:
+        print(json.dumps(data, indent=2))
+        return
+
+    if data["nodes"]["total"] == 0:
+        console.print("[yellow]No indexed nodes found. Run `ast-rag init <path>` first.[/yellow]")
+        return
+
+    console.rule("[bold blue]AST-RAG Index Statistics[/bold blue]")
+    console.print(f"  Files indexed: {data['files']:,}")
+
+    console.print()
+    console.print(f"[bold]Nodes[/bold] ({data['nodes']['total']:,} total)")
+    for kind, count in data["nodes"]["by_kind"].items():
+        console.print(f"  {kind:<20} {count:>8,}")
+
+    console.print()
+    console.print(f"[bold]Edges[/bold] ({data['edges']['total']:,} total)")
+    if data["edges"]["by_kind"]:
+        for kind, count in data["edges"]["by_kind"].items():
+            console.print(f"  {kind:<20} {count:>8,}")
+    else:
+        console.print("  [dim]none[/dim]")
+
+    console.print()
+    console.print("[bold]Languages[/bold]")
+    if data["languages"]:
+        total = sum(data["languages"].values()) or 1
+        for lang, count in data["languages"].items():
+            console.print(f"  {lang:<20} {count:>8,}  ({count / total:.0%})")
+    else:
+        console.print("  [dim]none[/dim]")
+
+
 if __name__ == "__main__":
     app()
