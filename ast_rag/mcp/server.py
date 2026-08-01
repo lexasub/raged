@@ -28,7 +28,11 @@ import os
 from pathlib import Path
 from typing import Optional
 
-from mcp.server.fastmcp import FastMCP
+try:
+    # mcp >= 2.0 renamed FastMCP to MCPServer and moved it to mcp.server
+    from mcp.server import MCPServer as FastMCP
+except ImportError:  # pragma: no cover - mcp < 2.0
+    from mcp.server.fastmcp import FastMCP
 
 from ast_rag.models import ProjectConfig, StandardResult
 from ast_rag.repositories import create_driver, apply_schema
