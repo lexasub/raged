@@ -245,8 +245,10 @@ class ParserManager:
         lang: str,
         source: Optional[bytes] = None,
         commit_hash: str = "INIT",
+        global_symbols: Optional[dict[str, str]] = None,
     ) -> list[ASTEdge]:
         return self._edge_extractor.extract_edges(
+            global_symbols=global_symbols,
             tree=tree,
             nodes=nodes,
             file_path=file_path,

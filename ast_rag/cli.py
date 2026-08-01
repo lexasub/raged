@@ -180,6 +180,13 @@ def init(
     all_blocks = []
     all_block_edges = []
 
+    # Two-phase index. Edge resolution matches references against a name -> id
+    # map; when that map only holds the current file's nodes, any reference to a
+    # symbol defined elsewhere is silently dropped. Collecting every symbol first
+    # and resolving afterwards is what lets cross-file references link at all.
+    parsed: list[tuple[str, str, bytes, object, list]] = []
+    global_symbols: dict[str, str] = {}
+
     with _index_progress() as progress:
         task = progress.add_task("Parsing", total=len(files))
         for fp, lang in files:
@@ -191,16 +198,29 @@ def init(
             with open(fp, "rb") as fh:
                 source = fh.read()
             nodes = pm.extract_nodes(tree, fp, lang, source, commit)
-            edges = pm.extract_edges(tree, nodes, fp, lang, source, commit)
+            parsed.append((fp, lang, source, tree, nodes))
+            all_nodes.extend(nodes)
+            # First definition of a name wins; files are walked in a stable order
+            # so the choice is deterministic across runs.
+            for node in nodes:
+                global_symbols.setdefault(node.name, node.id)
+
+    with _index_progress() as progress:
+        task = progress.add_task("Resolving", total=len(parsed))
+        for fp, lang, source, tree, nodes in parsed:
+            progress.update(task, description=f"Resolving {os.path.relpath(fp, root)}")
+            progress.advance(task)
+            all_edges.extend(
+                pm.extract_edges(
+                    tree, nodes, fp, lang, source, commit, global_symbols=global_symbols
+                )
+            )
 
             # Extract blocks for Python and Rust files
             if lang in ("python", "rust"):
                 blocks, block_edges = pm.extract_blocks(tree, nodes, fp, lang, source, commit)
                 all_blocks.extend(blocks)
                 all_block_edges.extend(block_edges)
-
-            all_nodes.extend(nodes)
-            all_edges.extend(edges)
 
     console.print(
         f"Extracted [bold]{len(all_nodes)}[/bold] nodes, [bold]{len(all_edges)}[/bold] edges, "
