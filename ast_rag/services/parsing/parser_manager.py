@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
 from pathlib import Path
 from typing import Optional, Union
 
@@ -99,6 +100,20 @@ class ParserManager:
 
         # Explicit injection (useful in tests)
         pm = ParserManager(cache=SQLiteParseCache("/tmp/test.sqlite"))
+
+    Thread safety
+    -------------
+    A single ``ParserManager`` may be shared across threads. ``WorkspaceWatcher``
+    already relies on this: it builds the manager on the main thread but parses
+    from ``threading.Timer`` callbacks, a new thread per debounce cycle.
+
+    ``tree_sitter.Parser`` holds mutable state for the duration of a parse, so
+    parsers are **not** shared: each thread lazily builds its own via
+    :meth:`_get_parser`. The immutable pieces — ``Language`` objects and
+    compiled ``Query`` objects — are shared, which is safe because extractors
+    allocate a fresh ``QueryCursor`` per call and never mutate the ``Query``.
+
+    Cache backends do their own locking (see ``ast_rag.utils.parse_cache``).
     """
 
     def __init__(
@@ -111,6 +126,8 @@ class ParserManager:
         self._parsers: dict[str, Parser] = {}
         self._compiled_queries: dict[str, dict[str, object]] = {}
         self._project_id: str = project_id
+        # Per-thread Parser instances; see the class docstring on thread safety.
+        self._thread_local = threading.local()
 
         self._node_extractor = NodeExtractor(project_id=project_id)
         self._edge_extractor = EdgeExtractor(project_id=project_id)
@@ -158,6 +175,26 @@ class ParserManager:
                 except Exception as exc:
                     logger.warning("Failed to compile query '%s' for '%s': %s", qname, name, exc)
             self._compiled_queries[name] = compiled
+        # Hand the freshly built parsers to the constructing thread so
+        # single-threaded callers reuse them instead of allocating a second set.
+        self._thread_local.parsers = dict(self._parsers)
+
+    def _get_parser(self, lang: str) -> Parser:
+        """Return this thread's ``Parser`` for ``lang``, creating it on first use.
+
+        The parser built in ``_init_languages`` stays the one handed to the
+        thread that constructed the manager, so single-threaded callers keep
+        their existing object and behaviour is unchanged.
+        """
+        parsers: Optional[dict[str, Parser]] = getattr(self._thread_local, "parsers", None)
+        if parsers is None:
+            parsers = {}
+            self._thread_local.parsers = parsers
+        parser = parsers.get(lang)
+        if parser is None:
+            parser = Parser(self._languages[lang])
+            parsers[lang] = parser
+        return parser
 
     def detect_language(self, file_path: str) -> Optional[str]:
         ext = Path(file_path).suffix.lower()
@@ -204,12 +241,12 @@ class ParserManager:
             lazy = self._cache.get(
                 abs_path,
                 source,
-                loader=lambda: self._parsers[_lang].parse(_src),
+                loader=lambda: self._get_parser(_lang).parse(_src),
             )
             if lazy is not None:
                 return lazy.resolve() if resolve else lazy
 
-        parser = self._parsers[lang]
+        parser = self._get_parser(lang)
         tree = parser.parse(source, old_tree) if old_tree is not None else parser.parse(source)
         self._cache.put(abs_path, source, tree)
         return tree

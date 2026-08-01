@@ -22,6 +22,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import sys
+import threading
 from collections import OrderedDict
 from typing import Any, Callable, ItemsView, Optional, Tuple
 
@@ -223,6 +224,10 @@ class BoundedParseCache:
         self._misses: int = 0
         # Store content hashes alongside entries for staleness checks
         self._hashes: dict[str, str] = {}
+        # Guards the compound read-then-act sequences below: a hit touches LRU
+        # order in _inner *and* reads _hashes, and those two must not interleave
+        # with another thread's put()/evict().
+        self._lock = threading.RLock()
 
     # ------------------------------------------------------------------
     # Core interface  (same as ParseCache / SQLiteParseCache)
@@ -249,20 +254,22 @@ class BoundedParseCache:
         Returns:
             A pre-loaded ``LazyTree`` on a hit, or ``None`` on a miss.
         """
-        if abs_path not in self._inner:
-            self._misses += 1
-            logger.debug("BoundedParseCache MISS: %s", abs_path)
-            return None
+        content_hash = self.hash_source(source)
+        with self._lock:
+            if abs_path not in self._inner:
+                self._misses += 1
+                logger.debug("BoundedParseCache MISS: %s", abs_path)
+                return None
 
-        stored_hash = self._hashes.get(abs_path)
-        if stored_hash != self.hash_source(source):
-            self._misses += 1
-            logger.debug("BoundedParseCache MISS (stale): %s", abs_path)
-            return None
+            stored_hash = self._hashes.get(abs_path)
+            if stored_hash != content_hash:
+                self._misses += 1
+                logger.debug("BoundedParseCache MISS (stale): %s", abs_path)
+                return None
 
-        self._hits += 1
-        # Touch for LRU ordering
-        tree, _lang = self._inner[abs_path]
+            self._hits += 1
+            # Touch for LRU ordering
+            tree, _lang = self._inner[abs_path]
 
         # Return a pre-loaded LazyTree (same pattern as ParseCache)
         lazy = LazyTree(loader=lambda t=tree: t)
@@ -281,8 +288,12 @@ class BoundedParseCache:
         """
         content_hash = self.hash_source(source)
         lang = ""  # language is not critical for cache storage
-        self._hashes[abs_path] = content_hash
-        self._inner.set_with_source(abs_path, (tree, lang), source)
+        with self._lock:
+            self._hashes[abs_path] = content_hash
+            self._inner.set_with_source(abs_path, (tree, lang), source)
+            # set_with_source may evict other keys to stay within limits;
+            # drop their hashes so _hashes cannot outgrow the cache.
+            self._hashes = {k: v for k, v in self._hashes.items() if k in self._inner}
         logger.debug("BoundedParseCache PUT : %s", abs_path)
 
     def evict(self, abs_path: str) -> None:
@@ -291,15 +302,19 @@ class BoundedParseCache:
         Args:
             abs_path: Absolute path of the file to evict.
         """
-        if abs_path in self._inner:
-            del self._inner[abs_path]
-            self._hashes.pop(abs_path, None)
+        with self._lock:
+            present = abs_path in self._inner
+            if present:
+                del self._inner[abs_path]
+                self._hashes.pop(abs_path, None)
+        if present:
             logger.debug("BoundedParseCache EVICT: %s", abs_path)
 
     def clear(self) -> None:
         """Evict all cached trees."""
-        self._inner.clear()
-        self._hashes.clear()
+        with self._lock:
+            self._inner.clear()
+            self._hashes.clear()
         logger.debug("BoundedParseCache cleared")
 
     # ------------------------------------------------------------------
@@ -321,13 +336,15 @@ class BoundedParseCache:
                 'max_memory_mb':   float,
             }
         """
-        total = self._hits + self._misses
-        inner_stats = self._inner.get_stats()
+        with self._lock:
+            hits, misses = self._hits, self._misses
+            inner_stats = self._inner.get_stats()
+        total = hits + misses
         return {
             "size": inner_stats["entries"],
-            "hits": self._hits,
-            "misses": self._misses,
-            "hit_rate": self._hits / total if total else 0.0,
+            "hits": hits,
+            "misses": misses,
+            "hit_rate": hits / total if total else 0.0,
             "max_entries": inner_stats["max_entries"],
             "memory_mb": inner_stats["memory_mb"],
             "max_memory_mb": inner_stats["max_memory_mb"],
