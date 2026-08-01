@@ -239,11 +239,6 @@ def make_noise() -> str:
 
 
 class TestPythonCallEdges:
-    @pytest.mark.xfail(
-        reason="known gap: Python extraction is skeletal — method/function call "
-        "edges (CALLS) are not extracted yet",
-        strict=True,
-    )
     def test_method_call_edges_extracted(self, pm: ParserManager, tmp_path: Path) -> None:
         _, edges = _parse(pm, tmp_path, CALL_SRC)
         call_kinds = {
