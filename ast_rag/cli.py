@@ -29,6 +29,15 @@ from typing import Optional
 
 import typer
 from rich.console import Console
+from rich.progress import (
+    BarColumn,
+    MofNCompleteColumn,
+    Progress,
+    SpinnerColumn,
+    TextColumn,
+    TimeElapsedColumn,
+    TimeRemainingColumn,
+)
 
 from ast_rag.models import ProjectConfig
 from ast_rag.services.parsing.parser_manager import ParserManager, walk_source_files
@@ -50,6 +59,26 @@ app = typer.Typer(
     add_completion=False,
 )
 console = Console()
+
+
+def _index_progress() -> Progress:
+    """Progress bar used by the indexing phases.
+
+    Indexing a large repository can run for many minutes -- embedding in
+    particular -- so the phases report count, elapsed and ETA rather than an
+    indeterminate spinner. `transient` keeps the finished bar from cluttering
+    the summary output.
+    """
+    return Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        MofNCompleteColumn(),
+        TimeElapsedColumn(),
+        TimeRemainingColumn(),
+        console=console,
+        transient=True,
+    )
 
 
 def _get_humanize_callback() -> callable:
@@ -151,9 +180,11 @@ def init(
     all_blocks = []
     all_block_edges = []
 
-    with console.status(f"Parsing {len(files)} files...") as status:
-        for i, (fp, lang) in enumerate(files):
-            status.update(f"Parsing [{i + 1}/{len(files)}] {os.path.relpath(fp, root)}")
+    with _index_progress() as progress:
+        task = progress.add_task("Parsing", total=len(files))
+        for fp, lang in files:
+            progress.update(task, description=f"Parsing {os.path.relpath(fp, root)}")
+            progress.advance(task)
             tree = pm.parse_file(fp)
             if tree is None:
                 continue
@@ -198,8 +229,13 @@ def init(
 
     # 4. Build embeddings
     embed = EmbeddingManager(cfg.qdrant, cfg.embedding, neo4j_driver=driver)
-    with console.status("Building embeddings..."):
-        count = embed.build_embeddings(all_nodes)
+    with _index_progress() as progress:
+        task = progress.add_task("Building embeddings", total=None)
+
+        def _on_batch(done: int, total: int) -> None:
+            progress.update(task, completed=done, total=total or None)
+
+        count = embed.build_embeddings(all_nodes, progress_callback=_on_batch)
     console.print(f"[green]Indexed {count} node embeddings.[/green]")
 
     console.rule("[bold green]Done[/bold green]")
