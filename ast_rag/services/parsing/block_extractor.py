@@ -202,12 +202,17 @@ class BlockExtractor:
         else:
             return blocks
 
-        # Recursively traverse the tree
-        def traverse(node: Node, depth: int = 1) -> None:
-            # Check if this node is within the function's range
-            if node.start_byte < func_node.start_byte or node.end_byte > func_node.end_byte:
-                return
+        # Anchor the walk on the function's own subtree. Starting from the tree
+        # root and pruning "outside the function" aborts immediately, because the
+        # root spans the whole file and so never satisfies that range check.
+        func_subtree = root_node.descendant_for_byte_range(
+            func_node.start_byte, func_node.end_byte
+        )
+        if func_subtree is None:
+            return blocks
 
+        # Recursively traverse the function body
+        def traverse(node: Node, depth: int = 1) -> None:
             # Check if this node type matches a block type
             block_type = type_map.get(node.type)
             if block_type:
@@ -222,12 +227,15 @@ class BlockExtractor:
                 )
                 if block:
                     blocks.append(block)
+                # Blocks nested inside this one are one level deeper
+                depth += 1
 
             # Recurse into children
             for child in node.children:
-                traverse(child, depth + 1)
+                traverse(child, depth)
 
-        traverse(root_node)
+        for child in func_subtree.children:
+            traverse(child)
         return blocks
 
     def _create_block(

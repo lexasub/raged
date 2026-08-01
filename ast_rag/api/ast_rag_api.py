@@ -47,6 +47,11 @@ from ast_rag.services.embedding_manager import EmbeddingManager
 from ast_rag.repositories.neo4j_helpers import KIND_TO_LABEL
 from ast_rag.services.graph_updater_service import compute_diff_for_commits
 
+# Call-like edges are stored as generic ``:EDGE`` relationships carrying a
+# ``kind`` property (see ``repositories.queries.batch_upsert_edges``), so
+# traversals must filter on that property rather than on a relationship type.
+CALL_EDGE_KINDS = ["CALLS", "VIRTUAL_CALL", "LAMBDA_CALL", "CROSS_FILE_CALL"]
+
 logger = logging.getLogger(__name__)
 
 # The active version filter used in all Cypher queries
@@ -164,15 +169,16 @@ LIMIT 50
         """
         max_depth = min(max_depth, 5)  # safety cap
         cypher = f"""
-MATCH (caller)-[:CALLS|VIRTUAL_CALL|LAMBDA_CALL|CROSS_FILE_CALL*1..{max_depth}]->(target {{id: $node_id}})
+MATCH (caller)-[rels:EDGE*1..{max_depth}]->(target {{id: $node_id}})
 WHERE caller.valid_to IS NULL AND target.valid_to IS NULL
+  AND all(rel IN rels WHERE rel.kind IN $call_kinds)
 RETURN DISTINCT caller
 ORDER BY caller.qualified_name
 LIMIT 200
 """
         results: list[ASTNode] = []
         with self._driver.session() as session:
-            for record in session.run(cypher, node_id=node_id):
+            for record in session.run(cypher, node_id=node_id, call_kinds=CALL_EDGE_KINDS):
                 results.append(_record_to_node(dict(record["caller"])))
         return results
 
@@ -187,15 +193,16 @@ LIMIT 200
         """
         max_depth = min(max_depth, 5)
         cypher = f"""
-MATCH (source {{id: $node_id}})-[:CALLS|VIRTUAL_CALL|LAMBDA_CALL|CROSS_FILE_CALL*1..{max_depth}]->(callee)
+MATCH (source {{id: $node_id}})-[rels:EDGE*1..{max_depth}]->(callee)
 WHERE source.valid_to IS NULL AND callee.valid_to IS NULL
+  AND all(rel IN rels WHERE rel.kind IN $call_kinds)
 RETURN DISTINCT callee
 ORDER BY callee.qualified_name
 LIMIT 200
 """
         results: list[ASTNode] = []
         with self._driver.session() as session:
-            for record in session.run(cypher, node_id=node_id):
+            for record in session.run(cypher, node_id=node_id, call_kinds=CALL_EDGE_KINDS):
                 results.append(_record_to_node(dict(record["callee"])))
         return results
 
@@ -546,11 +553,12 @@ LIMIT 100
                 print("Low confidence - may be incorrect resolution")
         """
         cypher = """
-MATCH ()-[r:CALLS {id: $call_edge_id}]->()
+MATCH ()-[r:EDGE {id: $call_edge_id}]->()
+WHERE r.kind IN $call_kinds
 RETURN r.confidence AS confidence
 """
         with self._driver.session() as session:
-            result = session.run(cypher, call_edge_id=call_edge_id)
+            result = session.run(cypher, call_edge_id=call_edge_id, call_kinds=CALL_EDGE_KINDS)
             record = result.single()
             if record and record["confidence"] is not None:
                 return float(record["confidence"])
@@ -892,8 +900,8 @@ LIMIT $limit
         Returns the total count across all reference types.
         """
         count_cypher = """
-MATCH (caller)-[r:CALLS]->(target {id: $node_id})
-WHERE caller.valid_to IS NULL AND r.valid_to IS NULL
+MATCH (caller)-[r:EDGE]->(target {id: $node_id})
+WHERE caller.valid_to IS NULL AND r.valid_to IS NULL AND r.kind IN $call_kinds
 RETURN count(*) as count
 """
         types_count_cypher = """
@@ -946,8 +954,8 @@ RETURN count(*) as count
 
         # Query for incoming CALLS edges with pagination
         calls_cypher = """
-MATCH (caller)-[r:CALLS]->(target {id: $node_id})
-WHERE caller.valid_to IS NULL AND r.valid_to IS NULL
+MATCH (caller)-[r:EDGE]->(target {id: $node_id})
+WHERE caller.valid_to IS NULL AND r.valid_to IS NULL AND r.kind IN $call_kinds
 RETURN caller, r
 ORDER BY caller.qualified_name
 SKIP $offset LIMIT $limit

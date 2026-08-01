@@ -221,8 +221,8 @@ class SchemaManager:
 
         query_parts = [
             "CREATE INDEX",
-            "IF NOT EXISTS" if if_not_exists else "",
             f"{index_name}",
+            "IF NOT EXISTS" if if_not_exists else "",
             f"FOR (n:{label})",
             f"ON (n.{property_name})",
         ]
@@ -504,8 +504,8 @@ class SchemaManager:
         """
         query_parts = [
             "CREATE CONSTRAINT",
-            "IF NOT EXISTS" if if_not_exists else "",
             f"{constraint_name}",
+            "IF NOT EXISTS" if if_not_exists else "",
             f"FOR (n:{label})",
             f"REQUIRE n.{property_name}",
             f"IS {constraint_type}" if constraint_type != "PROPERTY_EXISTENCE" else "",

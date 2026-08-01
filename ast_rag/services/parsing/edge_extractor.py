@@ -81,7 +81,9 @@ class EdgeExtractor:
                 )
 
         edges.extend(
-            self._extract_call_edges(tree, compiled_queries, name_to_id, source, commit_hash, lang)
+            self._extract_call_edges(
+                tree, nodes, compiled_queries, name_to_id, source, commit_hash, lang
+            )
         )
 
         if lang in ("cpp", "java", "rust"):
@@ -244,6 +246,7 @@ class EdgeExtractor:
     def _extract_call_edges(
         self,
         tree: Tree,
+        nodes: list[ASTNode],
         compiled: dict,
         name_to_id: dict[str, str],
         source: bytes,
@@ -257,7 +260,7 @@ class EdgeExtractor:
 
         method_nodes = [
             n
-            for n in []
+            for n in nodes
             if n.kind
             in (NodeKind.METHOD, NodeKind.FUNCTION, NodeKind.CONSTRUCTOR, NodeKind.DESTRUCTOR)
         ]
