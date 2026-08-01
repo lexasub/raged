@@ -916,7 +916,7 @@ RETURN count(*) as count
 """
         total = 0
         with self._driver.session() as session:
-            result = session.run(count_cypher, node_id=node_id)
+            result = session.run(count_cypher, node_id=node_id, call_kinds=CALL_EDGE_KINDS)
             record = result.single()
             total += record["count"] if record else 0
 
@@ -961,7 +961,10 @@ ORDER BY caller.qualified_name
 SKIP $offset LIMIT $limit
 """
         with self._driver.session() as session:
-            for record in session.run(calls_cypher, node_id=node_id, offset=offset, limit=limit):
+            for record in session.run(
+                calls_cypher, node_id=node_id, offset=offset, limit=limit,
+                call_kinds=CALL_EDGE_KINDS,
+            ):
                 caller_data = dict(record["caller"])
                 edge_data = dict(record["r"])
                 references.append(
