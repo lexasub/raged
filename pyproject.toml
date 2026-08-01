@@ -77,6 +77,13 @@ ast_rag = ["../schema/*.cql"]
 target-version = "py310"
 line-length = 100
 
+[tool.ruff.lint]
+# Pin the rule set explicitly. Without this ruff applies whatever its current
+# default happens to be, so a new ruff release changes what CI enforces with no
+# code change -- which is what took CI red on 2026-07-27 (321 of the 496 new
+# findings were UP045 alone). These four are the rules the tree is clean under.
+select = ["E4", "E7", "E9", "F"]
+
 [tool.mypy]
 python_version = "3.10"
 strict = false

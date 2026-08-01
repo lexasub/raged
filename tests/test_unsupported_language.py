@@ -46,7 +46,10 @@ class TestSupportedExtensionsHelpers:
     def test_supported_extensions_grouped_by_language(self) -> None:
         mapping = supported_extensions()
         assert mapping["java"] == [".java"]
-        assert mapping["typescript"] == [".ts", ".tsx"]
+        # cd75313 moved .tsx onto a dedicated TSX grammar and added .jsx to it,
+        # so .tsx is no longer grouped under "typescript".
+        assert mapping["typescript"] == [".ts"]
+        assert mapping["tsx"] == [".jsx", ".tsx"]
         assert ".cpp" in mapping["cpp"]
         assert ".h" in mapping["cpp"]
 
