@@ -48,6 +48,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import sqlite3
+import threading
 import time
 from typing import Any, Callable, Optional
 
@@ -98,16 +99,26 @@ class LazyTree:
         # Content hash — set by ParseCache.put() so get() can do a fast
         # identity check without re-hashing on every access.
         object.__setattr__(self, "_hash", "")
+        # Guards _ensure() so a tree shared across threads is loaded once.
+        object.__setattr__(self, "_load_lock", threading.Lock())
 
     # ------------------------------------------------------------------
     # Core load / resolve
     # ------------------------------------------------------------------
 
     def _ensure(self) -> None:
-        """Invoke the loader exactly once and cache the result."""
-        if object.__getattribute__(self, "_tree") is None:
-            tree = object.__getattribute__(self, "_loader")()
-            object.__setattr__(self, "_tree", tree)
+        """Invoke the loader exactly once and cache the result.
+
+        Double-checked locking: the common case (already resolved) stays
+        lock-free, while concurrent first-time access is serialised so the
+        loader — which may be an expensive tree-sitter parse — runs once.
+        """
+        if object.__getattribute__(self, "_tree") is not None:
+            return
+        with object.__getattribute__(self, "_load_lock"):
+            if object.__getattribute__(self, "_tree") is None:
+                tree = object.__getattribute__(self, "_loader")()
+                object.__setattr__(self, "_tree", tree)
 
     def resolve(self) -> Tree:
         """Force eager resolution and return the underlying Tree.
@@ -161,6 +172,12 @@ class ParseCache:
             cache.put(abs_path, source, tree)
             lazy = cache.get(abs_path, source)
         root = lazy.root_node
+
+    Thread safety
+    -------------
+    All public methods are guarded by an internal lock, so one instance may be
+    shared by the worker threads of a parallel index run. The counters are
+    updated under the same lock, keeping ``stats()`` internally consistent.
     """
 
     def __init__(self) -> None:
@@ -168,6 +185,7 @@ class ParseCache:
         self._store: dict[str, LazyTree] = {}
         self._hits: int = 0
         self._misses: int = 0
+        self._lock = threading.RLock()
 
     # ------------------------------------------------------------------
     # Core interface
@@ -198,15 +216,17 @@ class ParseCache:
             The **same** pre-loaded ``LazyTree`` instance on a hit, or ``None``
             on a miss / stale entry.
         """
-        lazy = self._store.get(abs_path)
-        if lazy is not None:
-            stored_hash = object.__getattribute__(lazy, "_hash")
-            if stored_hash == self.hash_source(source):
-                self._hits += 1
-                logger.debug("ParseCache HIT : %s", abs_path)
-                return lazy  # same instance — _tree already populated
+        content_hash = self.hash_source(source)
+        with self._lock:
+            lazy = self._store.get(abs_path)
+            if lazy is not None:
+                stored_hash = object.__getattribute__(lazy, "_hash")
+                if stored_hash == content_hash:
+                    self._hits += 1
+                    logger.debug("ParseCache HIT : %s", abs_path)
+                    return lazy  # same instance — _tree already populated
 
-        self._misses += 1
+            self._misses += 1
         logger.debug("ParseCache MISS: %s", abs_path)
         return None
 
@@ -226,7 +246,8 @@ class ParseCache:
         lazy = LazyTree(loader=lambda t=tree: t)
         object.__setattr__(lazy, "_tree", tree)  # pre-populate → eager
         object.__setattr__(lazy, "_hash", content_hash)
-        self._store[abs_path] = lazy
+        with self._lock:
+            self._store[abs_path] = lazy
         logger.debug("ParseCache PUT : %s", abs_path)
 
     def evict(self, abs_path: str) -> None:
@@ -235,13 +256,15 @@ class ParseCache:
         Args:
             abs_path: Absolute path of the file to evict.
         """
-        removed = self._store.pop(abs_path, None)
+        with self._lock:
+            removed = self._store.pop(abs_path, None)
         if removed is not None:
             logger.debug("ParseCache EVICT: %s", abs_path)
 
     def clear(self) -> None:
         """Evict *all* cached trees (e.g. after a full re-index)."""
-        self._store.clear()
+        with self._lock:
+            self._store.clear()
         logger.debug("ParseCache cleared")
 
     # ------------------------------------------------------------------
@@ -260,12 +283,14 @@ class ParseCache:
                 'hit_rate': float,  # hits / (hits + misses), or 0.0 if no ops
             }
         """
-        total = self._hits + self._misses
+        with self._lock:
+            hits, misses, size = self._hits, self._misses, len(self._store)
+        total = hits + misses
         return {
-            "size": len(self._store),
-            "hits": self._hits,
-            "misses": self._misses,
-            "hit_rate": self._hits / total if total else 0.0,
+            "size": size,
+            "hits": hits,
+            "misses": misses,
+            "hit_rate": hits / total if total else 0.0,
         }
 
 
@@ -310,6 +335,10 @@ class SQLiteParseCache:
         self._db_path = db_path
         self._hits: int = 0
         self._misses: int = 0
+        # check_same_thread=False only silences sqlite3's ownership assertion;
+        # it does not serialise access. _lock does that, so a single connection
+        # can be shared by the workers of a parallel index run.
+        self._lock = threading.RLock()
         self._conn: sqlite3.Connection = sqlite3.connect(db_path, check_same_thread=False)
         self._conn.executescript(_SCHEMA)
         self._conn.commit()
@@ -345,27 +374,28 @@ class SQLiteParseCache:
         Returns:
             A ``LazyTree(loader)`` on a hit, or ``None`` on a miss / stale entry.
         """
-        cur = self._conn.execute(
-            "SELECT content_hash FROM parse_cache WHERE file_path = ?",
-            (abs_path,),
-        )
-        row = cur.fetchone()
-        if row is not None and row[0] == self.hash_source(source):
-            # Update last_accessed timestamp for future LRU eviction.
-            self._conn.execute(
-                "UPDATE parse_cache SET last_accessed = ? WHERE file_path = ?",
-                (time.time(), abs_path),
+        content_hash = self.hash_source(source)
+        with self._lock:
+            cur = self._conn.execute(
+                "SELECT content_hash FROM parse_cache WHERE file_path = ?",
+                (abs_path,),
             )
-            self._conn.commit()
-            self._hits += 1
-            logger.debug("SQLiteParseCache HIT : %s", abs_path)
-            if loader is None:
-                # No loader supplied — caller must handle resolution themselves.
-                return None
-            lazy = LazyTree(loader=loader)
-            return lazy
+            row = cur.fetchone()
+            if row is not None and row[0] == content_hash:
+                # Update last_accessed timestamp for future LRU eviction.
+                self._conn.execute(
+                    "UPDATE parse_cache SET last_accessed = ? WHERE file_path = ?",
+                    (time.time(), abs_path),
+                )
+                self._conn.commit()
+                self._hits += 1
+                logger.debug("SQLiteParseCache HIT : %s", abs_path)
+                if loader is None:
+                    # No loader supplied — caller must handle resolution themselves.
+                    return None
+                return LazyTree(loader=loader)
 
-        self._misses += 1
+            self._misses += 1
         logger.debug("SQLiteParseCache MISS: %s", abs_path)
         return None
 
@@ -381,18 +411,19 @@ class SQLiteParseCache:
             source:   Source bytes the tree was parsed from.
             tree:     The freshly parsed Tree (not stored; accepted for parity).
         """
-        self._conn.execute(
-            """
-            INSERT INTO parse_cache (file_path, content_hash, source_bytes, last_accessed)
-            VALUES (?, ?, ?, ?)
-            ON CONFLICT(file_path) DO UPDATE SET
-                content_hash  = excluded.content_hash,
-                source_bytes  = excluded.source_bytes,
-                last_accessed = excluded.last_accessed
-            """,
-            (abs_path, self.hash_source(source), source, time.time()),
-        )
-        self._conn.commit()
+        with self._lock:
+            self._conn.execute(
+                """
+                INSERT INTO parse_cache (file_path, content_hash, source_bytes, last_accessed)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(file_path) DO UPDATE SET
+                    content_hash  = excluded.content_hash,
+                    source_bytes  = excluded.source_bytes,
+                    last_accessed = excluded.last_accessed
+                """,
+                (abs_path, self.hash_source(source), source, time.time()),
+            )
+            self._conn.commit()
         logger.debug("SQLiteParseCache PUT : %s", abs_path)
 
     def evict(self, abs_path: str) -> None:
@@ -401,20 +432,23 @@ class SQLiteParseCache:
         Args:
             abs_path: Absolute path of the file to evict.
         """
-        cur = self._conn.execute("DELETE FROM parse_cache WHERE file_path = ?", (abs_path,))
-        self._conn.commit()
+        with self._lock:
+            cur = self._conn.execute("DELETE FROM parse_cache WHERE file_path = ?", (abs_path,))
+            self._conn.commit()
         if cur.rowcount:
             logger.debug("SQLiteParseCache EVICT: %s", abs_path)
 
     def clear(self) -> None:
         """Delete *all* rows from the cache table."""
-        self._conn.execute("DELETE FROM parse_cache")
-        self._conn.commit()
+        with self._lock:
+            self._conn.execute("DELETE FROM parse_cache")
+            self._conn.commit()
         logger.debug("SQLiteParseCache cleared")
 
     def close(self) -> None:
         """Close the underlying database connection."""
-        self._conn.close()
+        with self._lock:
+            self._conn.close()
 
     # ------------------------------------------------------------------
     # Observability
@@ -433,13 +467,14 @@ class SQLiteParseCache:
                 'db_path':  str,    # path to the SQLite file
             }
         """
-        total = self._hits + self._misses
-        cur = self._conn.execute("SELECT COUNT(*) FROM parse_cache")
-        size = cur.fetchone()[0]
+        with self._lock:
+            hits, misses = self._hits, self._misses
+            size = self._conn.execute("SELECT COUNT(*) FROM parse_cache").fetchone()[0]
+        total = hits + misses
         return {
             "size": size,
-            "hits": self._hits,
-            "misses": self._misses,
-            "hit_rate": self._hits / total if total else 0.0,
+            "hits": hits,
+            "misses": misses,
+            "hit_rate": hits / total if total else 0.0,
             "db_path": self._db_path,
         }
