@@ -43,8 +43,16 @@ class EdgeExtractor:
         compiled_queries: dict[str, object],
         source: Optional[bytes] = None,
         commit_hash: str = "INIT",
+        global_symbols: Optional[dict[str, str]] = None,
     ) -> list[ASTEdge]:
-        """Extract edges (relationships) between AST nodes."""
+        """Extract edges (relationships) between AST nodes.
+
+        ``global_symbols`` optionally supplies a project-wide name -> node id map
+        so references to symbols defined in *other* files can resolve. Without it
+        only same-file references resolve, which leaves the large majority of a
+        real codebase's call graph unlinked. Local definitions take precedence,
+        so a file-local symbol always shadows a project-wide one of the same name.
+        """
         if source is None:
             try:
                 with open(file_path, "rb") as fh:
@@ -53,7 +61,8 @@ class EdgeExtractor:
                 source = b""
 
         edges: list[ASTEdge] = []
-        name_to_id: dict[str, str] = {n.name: n.id for n in nodes}
+        name_to_id: dict[str, str] = dict(global_symbols or {})
+        name_to_id.update({n.name: n.id for n in nodes})
 
         file_node_id = hashlib.sha256(
             f"{file_path}:{NodeKind.FILE.value}:{file_path}".encode()
