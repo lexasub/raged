@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import logging
 import uuid
-from typing import Callable, Optional
+from typing import TYPE_CHECKING, Callable, Optional
 
 import numpy as np
 from neo4j import Driver
@@ -35,7 +35,9 @@ from qdrant_client.models import (
     FieldCondition,
     MatchValue,
 )
-from sentence_transformers import SentenceTransformer
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from sentence_transformers import SentenceTransformer
 
 from ast_rag.models import ASTNode, SearchResult, QdrantConfig, EmbeddingConfig, NodeKind
 
@@ -95,7 +97,7 @@ class EmbeddingManager:
         self._embed_config = embed_config
         self._neo4j_driver = neo4j_driver
         self._client: Optional[QdrantClient] = None
-        self._model: Optional[SentenceTransformer] = None
+        self._model: Optional["SentenceTransformer"] = None
         # Validate hybrid weights if hybrid search is enabled
         if self._embed_config.hybrid_search:
             total = self._embed_config.vector_weight + self._embed_config.keyword_weight
@@ -110,8 +112,16 @@ class EmbeddingManager:
     # Lazy initialisation
     # ------------------------------------------------------------------
 
-    def _get_model(self) -> SentenceTransformer:
-        """Return local SentenceTransformer.  Not called when remote_url is set."""
+    def _get_model(self) -> "SentenceTransformer":
+        """Return local SentenceTransformer.  Not called when remote_url is set.
+
+        sentence_transformers pulls in torch and transformers and costs ~3s to
+        import. Only semantic search needs it, so it is imported here rather
+        than at module scope -- otherwise every CLI command, including pure
+        graph lookups like `goto` and `callers`, pays that cost.
+        """
+        from sentence_transformers import SentenceTransformer
+
         if self._model is None:
             logger.info(
                 "Loading embedding model locally: %s (device=%s)",
