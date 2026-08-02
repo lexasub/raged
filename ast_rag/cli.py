@@ -1401,7 +1401,7 @@ def blocks(
 def list_lambdas(
     lang: Optional[str] = typer.Option(None, "--lang", "-l", help="Language filter"),
     captured: bool = typer.Option(
-        False, "--captured", "-c", help="Only show lambdas with captured variables"
+        False, "--captured", "-C", help="Only show lambdas with captured variables"
     ),
     source: bool = typer.Option(False, "--source", "-s", help="Show source code"),
     config: Optional[str] = typer.Option(None, "--config", "-c"),
