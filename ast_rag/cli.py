@@ -1401,7 +1401,12 @@ def blocks(
 def list_lambdas(
     lang: Optional[str] = typer.Option(None, "--lang", "-l", help="Language filter"),
     captured: bool = typer.Option(
-        False, "--captured", "-c", help="Only show lambdas with captured variables"
+        # "-c" is the project-wide shorthand for "--config" (used by 19 other
+        # commands), so "--captured" takes "-C" to avoid shadowing it. See #65.
+        False,
+        "--captured",
+        "-C",
+        help="Only show lambdas with captured variables",
     ),
     source: bool = typer.Option(False, "--source", "-s", help="Show source code"),
     config: Optional[str] = typer.Option(None, "--config", "-c"),
@@ -1419,6 +1424,7 @@ def list_lambdas(
 
       # Get lambdas with captured variables (closures)
       ast-rag lambdas --captured
+      ast-rag lambdas -C
 
       # Get Python lambdas only
       ast-rag lambdas --lang python
