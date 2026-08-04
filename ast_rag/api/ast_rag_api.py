@@ -809,7 +809,15 @@ LIMIT $limit
         # - Java: "public void methodName(int x, String y)"
         # - C++: "void methodName(int x, String y)"
         # - Rust: "fn method_name(&self, x: i32) -> Result<T>"
-        full_pattern = f".*{name_pattern}{params_pattern}.*{return_pattern}"
+        #
+        # Signatures with many parameters are stored wrapped across multiple
+        # lines (e.g. "parse_file(\n    self,\n    file_path: str,\n)"). Neo4j's
+        # regex engine (like Java's Pattern) does not let "." match "\n" unless
+        # the DOTALL flag is enabled, so without it every ".*" in this pattern
+        # silently fails to bridge a line break and the search returns no
+        # results for those functions. Prefix with the inline "(?s)" flag so
+        # "." matches newlines too.
+        full_pattern = f"(?s).*{name_pattern}{params_pattern}.*{return_pattern}"
 
         return full_pattern
 
