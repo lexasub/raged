@@ -24,10 +24,12 @@ from __future__ import annotations
 import json
 import logging
 import os
+import time
 from pathlib import Path
 from typing import Optional
 
 import typer
+from neo4j.exceptions import AuthError
 from rich.console import Console
 from rich.progress import (
     BarColumn,
@@ -102,20 +104,91 @@ humanize_option = typer.Option(
 
 
 def _load_config(config_path: Optional[str] = None) -> ProjectConfig:
-    """Load project config from JSON file or return defaults."""
+    """Load project config from JSON file or return defaults.
+
+    Resolution order, lowest priority first: built-in defaults (which point at
+    localhost, so a fresh clone works against the documented Docker setup with
+    no config file at all), then ``ast_rag_config.json`` in the CWD, then an
+    explicit ``--config``, then ``AST_RAG_*`` environment variables.
+
+    The env layer is last so that a container or CI job can point the same
+    checkout at different services without editing a tracked file.
+    """
     if config_path and Path(config_path).exists():
-        return ProjectConfig.model_validate_json(Path(config_path).read_text())
-    # Check for ast_rag_config.json in CWD
-    default = Path("ast_rag_config.json")
-    if default.exists():
-        return ProjectConfig.model_validate_json(default.read_text())
-    return ProjectConfig()
+        cfg = ProjectConfig.model_validate_json(Path(config_path).read_text())
+    else:
+        default = Path("ast_rag_config.json")
+        if default.exists():
+            cfg = ProjectConfig.model_validate_json(default.read_text())
+        else:
+            cfg = ProjectConfig()
+
+    return _apply_env_overrides(cfg)
+
+
+def _apply_env_overrides(cfg: ProjectConfig) -> ProjectConfig:
+    """Overlay ``AST_RAG_*`` environment variables onto a loaded config."""
+    env_map = {
+        "AST_RAG_NEO4J_URI": (cfg.neo4j, "uri"),
+        "AST_RAG_NEO4J_USER": (cfg.neo4j, "user"),
+        "AST_RAG_NEO4J_PASSWORD": (cfg.neo4j, "password"),
+        "AST_RAG_NEO4J_DATABASE": (cfg.neo4j, "database"),
+        "AST_RAG_QDRANT_URL": (cfg.qdrant, "url"),
+        "AST_RAG_QDRANT_COLLECTION": (cfg.qdrant, "collection_name"),
+    }
+    for var, (section, field) in env_map.items():
+        value = os.environ.get(var)
+        if value:
+            setattr(section, field, value)
+    return cfg
+
+
+def _connect(cfg: ProjectConfig):
+    """Create a Neo4j driver and fail fast with a usable message if it is down.
+
+    Every command needs a driver, so the reachability check lives here rather
+    than being repeated at each call site.
+    """
+    driver = create_driver(cfg.neo4j)
+    _verify_neo4j(driver, cfg)
+    return driver
 
 
 def _build_api(cfg: ProjectConfig) -> ASTRagAPI:
-    driver = create_driver(cfg.neo4j)
+    driver = _connect(cfg)
     embed = EmbeddingManager(cfg.qdrant, cfg.embedding, neo4j_driver=driver)
     return ASTRagAPI(driver, embed)
+
+
+def _verify_neo4j(driver, cfg: ProjectConfig) -> None:
+    """Fail fast with a usable message when Neo4j is not reachable.
+
+    Without this the first query blocks for the driver's default connection
+    timeout and then raises ServiceUnavailable, which Typer renders as a full
+    traceback. For anyone who has not started the services yet -- the common
+    case on a fresh clone -- that is a wall of Bolt internals rather than
+    "start Neo4j".
+    """
+    try:
+        driver.verify_connectivity()
+    except AuthError:
+        console.print(
+            f"[red]Neo4j rejected the credentials for[/red] {cfg.neo4j.uri} "
+            f"(user: {cfg.neo4j.user}).\n"
+            "Set AST_RAG_NEO4J_USER / AST_RAG_NEO4J_PASSWORD, or edit "
+            "ast_rag_config.json."
+        )
+        raise typer.Exit(code=1)
+    except Exception as exc:  # ServiceUnavailable and friends
+        console.print(
+            f"[red]Cannot reach Neo4j at[/red] {cfg.neo4j.uri}\n\n"
+            "Start the services:\n"
+            "  [cyan]docker compose up -d[/cyan]\n\n"
+            "Or point AST-RAG somewhere else:\n"
+            "  [cyan]export AST_RAG_NEO4J_URI=bolt://host:7687[/cyan]\n\n"
+            f"[dim]{type(exc).__name__}: {str(exc).splitlines()[0]}[/dim]"
+        )
+        raise typer.Exit(code=1)
 
 
 # ---------------------------------------------------------------------------
@@ -154,7 +227,7 @@ def init(
     console.rule(f"[bold blue]AST-RAG init[/bold blue]: {root}")
 
     # 1. Apply schema
-    driver = create_driver(cfg.neo4j)
+    driver = _connect(cfg)
     with console.status("Applying Neo4j schema..."):
         apply_schema(driver)
 
@@ -351,7 +424,7 @@ def update(
         logging.basicConfig(level=logging.WARNING)
 
     cfg = _load_config(config)
-    driver = create_driver(cfg.neo4j)
+    driver = _connect(cfg)
     embed = EmbeddingManager(cfg.qdrant, cfg.embedding, neo4j_driver=driver)
 
     console.rule(f"[bold blue]AST-RAG update[/bold blue] {from_commit[:8]}..{to_commit[:8]}")
@@ -502,7 +575,7 @@ def refs(
 ) -> None:
     """Find all references/usages of a symbol."""
     cfg = _load_config(config)
-    driver = create_driver(cfg.neo4j)
+    driver = _connect(cfg)
     embed = EmbeddingManager(cfg.qdrant, cfg.embedding, neo4j_driver=driver)
     api = ASTRagAPI(driver, embed)
 
@@ -697,7 +770,7 @@ def workspace(
         logging.basicConfig(level=logging.WARNING)
 
     cfg = _load_config(config)
-    driver = create_driver(cfg.neo4j)
+    driver = _connect(cfg)
     root = os.path.abspath(path)
 
     console.rule(f"[bold blue]AST-RAG workspace[/bold blue]: {root}")
@@ -774,7 +847,6 @@ def evaluate(
     from pathlib import Path
 
     from ast_rag.api import ASTRagAPI
-    from ast_rag.repositories import create_driver
     from ast_rag.services.embedding_manager import EmbeddingManager
 
     # Load configuration
@@ -784,7 +856,7 @@ def evaluate(
     console.rule("[bold blue]AST-RAG QUALITY EVALUATION[/bold blue]")
     console.print("[yellow]Initializing Neo4j and EmbeddingManager...[/yellow]")
 
-    driver = create_driver(cfg.neo4j)
+    driver = _connect(cfg)
     embed = EmbeddingManager(cfg.qdrant, cfg.embedding, neo4j_driver=driver)
     api = ASTRagAPI(driver, embed)
 
@@ -1071,16 +1143,44 @@ def signature_search(
 # ---------------------------------------------------------------------------
 
 
-def _parse_file_for_multiprocessing(args):
-    """Parse file for multiprocessing - must be at module level for pickle."""
-    import sys
-    import os
+def _print_batch_progress(done, total, n_nodes, n_edges, batch_start, start_time):
+    """One progress line per batch, shared by both indexing phases."""
+    elapsed = time.time() - start_time
+    rate = done / elapsed if elapsed > 0 else 0
+    console.print(
+        f"[cyan][{done:>6}/{total}][/cyan] "
+        f"+{n_nodes:>4} nodes, +{n_edges:>4} edges | "
+        f"{rate:>5.1f} files/s | "
+        f"Batch: {time.time() - batch_start:.2f}s"
+    )
 
-    # Add project root to path for subprocess
-    project_root = os.environ.get("AST_RAG_PROJECT_ROOT", "/home/su/src/local/raged")
-    if project_root not in sys.path:
+
+# Set once per worker process by _init_symbol_worker so the project-wide symbol
+# map is pickled per worker rather than per file.
+_WORKER_SYMBOLS: dict[str, str] = {}
+
+
+def _init_symbol_worker(symbols: dict[str, str]) -> None:
+    """ProcessPoolExecutor initializer: publish the symbol map to this worker."""
+    global _WORKER_SYMBOLS
+    _WORKER_SYMBOLS = symbols
+
+
+def _worker_sys_path() -> None:
+    """Make ast_rag importable in a subprocess started with spawn."""
+    import os
+    import sys
+
+    project_root = os.environ.get("AST_RAG_PROJECT_ROOT")
+    if project_root and project_root not in sys.path:
         sys.path.insert(0, project_root)
 
+
+def _parse_nodes_for_multiprocessing(args):
+    """Phase 1: extract nodes only. Must be module level for pickle."""
+    import os
+
+    _worker_sys_path()
     file_path, lang, source = args
     commit = os.environ.get("AST_RAG_COMMIT", "INIT")
     project_id = os.environ.get("AST_RAG_PROJECT_ID", "default")
@@ -1090,10 +1190,37 @@ def _parse_file_for_multiprocessing(args):
         pm = ParserManager(project_id=project_id)
         tree = pm.parse_file(file_path, source=source)
         if tree is None:
-            return (file_path, [], [])
+            return (file_path, [], None)
         nodes = pm.extract_nodes(tree, file_path, lang, source, commit)
-        edges = pm.extract_edges(tree, nodes, file_path, lang, source, commit)
-        return (file_path, nodes, edges)
+        return (file_path, nodes, None)
+    except Exception as e:
+        return (file_path, [], str(e))
+
+
+def _parse_edges_for_multiprocessing(args):
+    """Phase 2: extract edges, resolving against the project-wide symbol map.
+
+    The tree is re-parsed rather than carried over from phase 1 because
+    tree-sitter trees are not picklable across processes.
+    """
+    import os
+
+    _worker_sys_path()
+    file_path, lang, source = args
+    commit = os.environ.get("AST_RAG_COMMIT", "INIT")
+    project_id = os.environ.get("AST_RAG_PROJECT_ID", "default")
+    try:
+        from ast_rag.services.parsing.parser_manager import ParserManager
+
+        pm = ParserManager(project_id=project_id)
+        tree = pm.parse_file(file_path, source=source)
+        if tree is None:
+            return (file_path, [], None)
+        nodes = pm.extract_nodes(tree, file_path, lang, source, commit)
+        edges = pm.extract_edges(
+            tree, nodes, file_path, lang, source, commit, global_symbols=_WORKER_SYMBOLS
+        )
+        return (file_path, edges, None)
     except Exception as e:
         return (file_path, [], str(e))
 
@@ -1132,7 +1259,7 @@ def index_folder(
     os.environ["AST_RAG_PROJECT_ROOT"] = str(Path(__file__).parent.parent.parent)
 
     from ast_rag.services.parsing.parser_manager import EXT_TO_LANG
-    from ast_rag.repositories import create_driver, apply_schema
+    from ast_rag.repositories import apply_schema
     from ast_rag.services.graph_updater_service import (
         _nodes_to_batch_by_label,
         batch_upsert_nodes,
@@ -1156,7 +1283,7 @@ def index_folder(
 
     # Connect to Neo4j
     console.print("[yellow]Connecting to Neo4j...[/yellow]")
-    driver = create_driver(cfg.neo4j)
+    driver = _connect(cfg)
     if not no_schema:
         console.print("[yellow]Applying schema...[/yellow]")
         apply_schema(driver)
@@ -1206,69 +1333,108 @@ def index_folder(
     errors = 0
     start_time = time.time()
 
-    for i in range(0, len(all_files), batch_size):
-        batch = all_files[i : i + batch_size]
+    # Two-phase index, matching `init`. Edge resolution matches references
+    # against a name -> id map; when that map holds only the current file's
+    # nodes, every reference to a symbol defined elsewhere is silently dropped.
+    # Indexing this repo that way produced 330 CALLS edges and *zero* of them
+    # crossing a file boundary. Collecting all symbols first is what lets
+    # cross-file references link at all. See #56.
+    sources: dict[str, bytes] = {}
+    for fp, lang in all_files:
+        try:
+            with open(fp, "rb") as f:
+                sources[fp] = f.read()
+        except Exception:
+            errors += 1
+
+    indexable = [(fp, lang) for fp, lang in all_files if fp in sources]
+    global_symbols: dict[str, str] = {}
+
+    # ---- Phase 1: nodes, and the project-wide symbol map -------------------
+    console.print("[yellow]Phase 1/2: extracting symbols...[/yellow]")
+    for i in range(0, len(indexable), batch_size):
+        batch = indexable[i : i + batch_size]
         batch_start = time.time()
+        args_list = [(fp, lang, sources[fp]) for fp, lang in batch]
 
-        # Read files
-        files_with_source = []
-        for fp, lang in batch:
-            try:
-                with open(fp, "rb") as f:
-                    source = f.read()
-                files_with_source.append((fp, lang, source))
-            except Exception:
-                errors += 1
-
-        # Parse in parallel
-        parsed = []
-        with ProcessPoolExecutor(max_workers=workers) as executor:
-            futures = [
-                executor.submit(_parse_file_for_multiprocessing, args) for args in files_with_source
-            ]
-            for future in as_completed(futures):
-                parsed.append(future.result())
-
-        # Collect nodes and edges
         batch_nodes = []
-        batch_edges = []
-        for fp, nodes, edges_or_error in parsed:
-            if isinstance(edges_or_error, str):
-                errors += 1
-            else:
-                batch_nodes.extend(nodes)
-                batch_edges.extend(edges_or_error)
+        with ProcessPoolExecutor(max_workers=workers) as executor:
+            for future in as_completed(
+                executor.submit(_parse_nodes_for_multiprocessing, a) for a in args_list
+            ):
+                fp, nodes, error = future.result()
+                if error:
+                    errors += 1
+                else:
+                    batch_nodes.extend(nodes)
 
-        # Insert to Neo4j
+        # First definition of a name wins; files are walked in a stable order
+        # so the choice is deterministic across runs.
+        for node in batch_nodes:
+            global_symbols.setdefault(node.name, node.id)
+
         if batch_nodes:
             try:
                 with driver.session() as session:
                     by_label = _nodes_to_batch_by_label(batch_nodes)
                     for label, props_list in by_label.items():
                         batch_upsert_nodes(session, {label: props_list})
-
-                    all_edge_dicts = [e.to_neo4j_props() for e in batch_edges]
-                    batch_upsert_edges(session, all_edge_dicts)
-
                 total_nodes += len(batch_nodes)
+            except Exception as e:
+                console.print(f"[red]Neo4j error: {e}[/red]")
+                errors += 1
+
+        _print_batch_progress(
+            min(i + batch_size, len(indexable)),
+            len(indexable),
+            len(batch_nodes),
+            0,
+            batch_start,
+            start_time,
+        )
+
+    # ---- Phase 2: edges, resolved against every symbol ---------------------
+    console.print(
+        f"[yellow]Phase 2/2: resolving edges against {len(global_symbols)} symbols...[/yellow]"
+    )
+    for i in range(0, len(indexable), batch_size):
+        batch = indexable[i : i + batch_size]
+        batch_start = time.time()
+        args_list = [(fp, lang, sources[fp]) for fp, lang in batch]
+
+        batch_edges = []
+        with ProcessPoolExecutor(
+            max_workers=workers, initializer=_init_symbol_worker, initargs=(global_symbols,)
+        ) as executor:
+            for future in as_completed(
+                executor.submit(_parse_edges_for_multiprocessing, a) for a in args_list
+            ):
+                fp, edges, error = future.result()
+                if error:
+                    errors += 1
+                else:
+                    batch_edges.extend(edges)
+
+        if batch_edges:
+            try:
+                with driver.session() as session:
+                    batch_upsert_edges(session, [e.to_neo4j_props() for e in batch_edges])
                 total_edges += len(batch_edges)
             except Exception as e:
                 console.print(f"[red]Neo4j error: {e}[/red]")
                 errors += 1
 
-        # Progress
-        elapsed = time.time() - start_time
-        files_done = min(i + batch_size, len(all_files))
-        files_per_sec = files_done / elapsed if elapsed > 0 else 0
-
-        console.print(
-            f"[cyan][{files_done:>6}/{len(all_files)}][/cyan] "
-            f"+{len(batch_nodes):>4} nodes, +{len(batch_edges):>4} edges | "
-            f"{files_per_sec:>5.1f} files/s | "
-            f"Batch: {time.time() - batch_start:.2f}s"
+        _print_batch_progress(
+            min(i + batch_size, len(indexable)),
+            len(indexable),
+            0,
+            len(batch_edges),
+            batch_start,
+            start_time,
         )
 
     total_time = time.time() - start_time
+    files_done = len(indexable)
 
     console.rule("[bold green]FOLDER COMPLETE[/bold green]")
     console.print(f"[bold]Time:[/bold]      {total_time / 60:.1f} minutes")
@@ -1756,7 +1922,7 @@ def analyze_stacktrace(
     cfg = _load_config(config)
 
     try:
-        driver = create_driver(cfg.neo4j)
+        driver = _connect(cfg)
         embed = EmbeddingManager(cfg.qdrant, cfg.embedding, neo4j_driver=driver)
 
         from ast_rag.stack_trace import StackTraceService
@@ -1939,7 +2105,7 @@ def stats(
         logging.basicConfig(level=logging.WARNING)
 
     cfg = _load_config(config)
-    driver = create_driver(cfg.neo4j)
+    driver = _connect(cfg)
     try:
         data = _collect_index_stats(driver)
     finally:
