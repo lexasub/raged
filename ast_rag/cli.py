@@ -118,6 +118,56 @@ def _build_api(cfg: ProjectConfig) -> ASTRagAPI:
     return ASTRagAPI(driver, embed)
 
 
+def _lang_of(node) -> str:
+    """Language as a plain string, whether it is an enum or already a str."""
+    lang = getattr(node, "lang", None)
+    return getattr(lang, "value", None) or str(lang or "unknown")
+
+
+def _describe_ambiguity(name: str, defs: list) -> Optional[str]:
+    """Describe a name that resolved to more than one symbol, else None.
+
+    ``find_definition`` returns every match and the commands act on the first,
+    so without this the caller cannot tell that a choice was made at all -- an
+    empty result reads as "this symbol has nothing" rather than "I looked at
+    the wrong symbol". See #64.
+
+    Leads with "ambiguous" so an agent scanning the output hits it first, and
+    avoids an exclamation mark, per the discussion on the issue.
+    """
+    if len(defs) < 2:
+        return None
+
+    counts: dict[str, int] = {}
+    for d in defs:
+        lang = _lang_of(d)
+        counts[lang] = counts.get(lang, 0) + 1
+    breakdown = ", ".join(
+        f"{n} {lang}" for lang, n in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
+    )
+
+    chosen = defs[0].qualified_name
+    alternatives = [d.qualified_name for d in defs[1:4] if d.qualified_name != chosen]
+    hint = ""
+    if alternatives:
+        hint = " Re-run with a qualified name to pick another, for example " + ", ".join(
+            alternatives
+        )
+
+    return (
+        f"ambiguous: '{name}' matched {len(defs)} symbols ({breakdown}). "
+        f"Reporting on {chosen}.{hint}"
+    )
+
+
+def _warn_if_ambiguous(name: str, defs: list) -> Optional[str]:
+    """Print the ambiguity note (if any) and return it for JSON consumers."""
+    note = _describe_ambiguity(name, defs)
+    if note:
+        console.print(f"[yellow]{note}[/yellow]")
+    return note
+
+
 # ---------------------------------------------------------------------------
 # init command
 # ---------------------------------------------------------------------------
@@ -473,6 +523,7 @@ def callers(
         console.print(f"[yellow]Symbol not found: {qualified_name}[/yellow]")
         raise typer.Exit(1)
 
+    _warn_if_ambiguous(qualified_name, defs)
     target = defs[0]
     if humanize:
         console.print(f"Finding callers of [bold]{target.qualified_name}[/bold]...")
@@ -562,6 +613,7 @@ def call_graph(
         console.print(f"[red]Function '{name}' not found[/red]")
         raise typer.Exit(1)
 
+    _warn_if_ambiguous(name, defs)
     node = defs[0]
 
     if direction in ("callers", "both"):
@@ -605,6 +657,7 @@ def symbol_impact(
         console.print(f"[red]Symbol '{name}' not found[/red]")
         raise typer.Exit(1)
 
+    _warn_if_ambiguous(name, defs)
     node = defs[0]
 
     # Gather all info
@@ -815,6 +868,7 @@ def evaluate(
         elif tool_name == "find_callers":
             defs = api.find_definition(params["name"], lang=params.get("lang"))
             if defs:
+                _warn_if_ambiguous(params["name"], defs)
                 results = api.find_callers(defs[0].id, max_depth=params.get("depth", 1))
                 returned_items = results
             else:
@@ -1350,6 +1404,7 @@ def blocks(
         function_id = function
         function_name = function
     else:
+        _warn_if_ambiguous(function, defs)
         function_id = defs[0].id
         function_name = defs[0].qualified_name
 
@@ -1567,6 +1622,7 @@ def summarize(
         console.print(f"[red]Symbol not found: {qualified_name}[/red]")
         raise typer.Exit(1)
 
+    _warn_if_ambiguous(qualified_name, defs)
     node = defs[0]
 
     # Check if node kind is summarizable
