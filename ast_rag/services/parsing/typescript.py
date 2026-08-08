@@ -31,6 +31,27 @@ TYPESCRIPT_QUERIES: dict[str, str] = {
   parameters: (formal_parameters) @params
 ) @node
 """,
+    # `const add = (a, b) => a + b` is how most TypeScript code declares
+    # functions, and none of it was indexed. function_expression is included so
+    # `const f = function () {}` is treated the same way.
+    "arrow_function_defs": """
+(lexical_declaration
+  (variable_declarator
+    name: (identifier) @name
+    value: [
+      (arrow_function)
+      (function_expression)
+    ]
+  )
+) @node
+""",
+    # A type alias names a type just as an interface does, so it is indexed
+    # with the same kind; there is no dedicated NodeKind for it.
+    "type_alias_defs": """
+(type_alias_declaration
+  name: (type_identifier) @name
+) @node
+""",
     "method_defs": """
 (method_definition
   name: (property_identifier) @name

@@ -34,6 +34,12 @@ QUERY_KIND_MAP: dict[str, NodeKind] = {
     "namespace_defs": NodeKind.NAMESPACE,
     "impl_defs": NodeKind.CLASS,  # Rust impl block mapped to class
     "function_defs": NodeKind.FUNCTION,
+    # TypeScript: `const f = () => {}`. Indexed as a plain function so goto,
+    # refs and callers treat it like any other.
+    "arrow_function_defs": NodeKind.FUNCTION,
+    # TypeScript: `type UserId = string`. A named type declaration, the same
+    # role an interface plays; there is no dedicated NodeKind for it.
+    "type_alias_defs": NodeKind.INTERFACE,
     "method_defs": NodeKind.METHOD,
     "constructor_defs": NodeKind.CONSTRUCTOR,
     "destructor_defs": NodeKind.DESTRUCTOR,
