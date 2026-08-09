@@ -1198,10 +1198,12 @@ def _parse_nodes_for_multiprocessing(args):
 
 
 def _parse_edges_for_multiprocessing(args):
-    """Phase 2: extract edges, resolving against the project-wide symbol map.
+    """Phase 2: extract edges and blocks, resolving against the symbol map.
 
     The tree is re-parsed rather than carried over from phase 1 because
-    tree-sitter trees are not picklable across processes.
+    tree-sitter trees are not picklable across processes. Blocks are extracted
+    here too rather than in a third pass, since this phase already holds both
+    the tree and the file's nodes, which is everything extract_blocks needs.
     """
     import os
 
@@ -1215,14 +1217,18 @@ def _parse_edges_for_multiprocessing(args):
         pm = ParserManager(project_id=project_id)
         tree = pm.parse_file(file_path, source=source)
         if tree is None:
-            return (file_path, [], None)
+            return (file_path, [], [], [], None)
         nodes = pm.extract_nodes(tree, file_path, lang, source, commit)
         edges = pm.extract_edges(
             tree, nodes, file_path, lang, source, commit, global_symbols=_WORKER_SYMBOLS
         )
-        return (file_path, edges, None)
+        blocks: list = []
+        block_edges: list = []
+        if lang in ("python", "rust"):
+            blocks, block_edges = pm.extract_blocks(tree, nodes, file_path, lang, source, commit)
+        return (file_path, edges, blocks, block_edges, None)
     except Exception as e:
-        return (file_path, [], str(e))
+        return (file_path, [], [], [], str(e))
 
 
 @app.command()
@@ -1264,10 +1270,15 @@ def index_folder(
         _nodes_to_batch_by_label,
         batch_upsert_nodes,
         batch_upsert_edges,
+        batch_upsert_blocks,
+        batch_upsert_block_edges,
     )
 
     cfg = _load_config(config)
     folder_path = Path(path).resolve()
+    # Workers read this from the environment; keep the parent in step so
+    # blocks are stamped with the same commit as the nodes and edges.
+    commit = os.environ.get("AST_RAG_COMMIT", "INIT")
 
     if not folder_path.exists():
         console.print(f"[red]Error: Folder not found: {folder_path}[/red]")
@@ -1330,6 +1341,7 @@ def index_folder(
     # Index in batches
     total_nodes = 0
     total_edges = 0
+    total_blocks = 0
     errors = 0
     start_time = time.time()
 
@@ -1403,23 +1415,35 @@ def index_folder(
         args_list = [(fp, lang, sources[fp]) for fp, lang in batch]
 
         batch_edges = []
+        batch_blocks = []
+        batch_block_edges = []
         with ProcessPoolExecutor(
             max_workers=workers, initializer=_init_symbol_worker, initargs=(global_symbols,)
         ) as executor:
             for future in as_completed(
                 executor.submit(_parse_edges_for_multiprocessing, a) for a in args_list
             ):
-                fp, edges, error = future.result()
+                fp, edges, blocks, block_edges, error = future.result()
                 if error:
                     errors += 1
                 else:
                     batch_edges.extend(edges)
+                    batch_blocks.extend(blocks)
+                    batch_block_edges.extend(block_edges)
 
-        if batch_edges:
+        if batch_edges or batch_blocks:
             try:
                 with driver.session() as session:
-                    batch_upsert_edges(session, [e.to_neo4j_props() for e in batch_edges])
-                total_edges += len(batch_edges)
+                    if batch_edges:
+                        batch_upsert_edges(session, [e.to_neo4j_props() for e in batch_edges])
+                        total_edges += len(batch_edges)
+                    # `init` stores blocks; index-folder never did, so
+                    # `ast-rag blocks` and `ast-rag lambdas` returned nothing
+                    # for any index built this way.
+                    if batch_blocks:
+                        batch_upsert_blocks(session, batch_blocks, commit)
+                        batch_upsert_block_edges(session, batch_block_edges)
+                        total_blocks += len(batch_blocks)
             except Exception as e:
                 console.print(f"[red]Neo4j error: {e}[/red]")
                 errors += 1
@@ -1442,6 +1466,7 @@ def index_folder(
     console.print(f"[bold]Speed:[/bold]     {files_done / total_time:.1f} files/s")
     console.print(f"[bold]Nodes:[/bold]     {total_nodes:,}")
     console.print(f"[bold]Edges:[/bold]     {total_edges:,}")
+    console.print(f"[bold]Blocks:[/bold]    {total_blocks:,}")
     console.print(f"[bold]Errors:[/bold]    {errors}")
 
     driver.close()
