@@ -72,3 +72,51 @@ def test_constraint_name_not_immediately_after_if_not_exists():
         query = _captured_query(fn, **kwargs)
         assert "IF NOT EXISTS c_name" not in query
         assert "IF NOT EXISTS i_name" not in query
+
+
+def test_fulltext_index_name_precedes_if_not_exists():
+    """Same ordering rule as CREATE CONSTRAINT, at the sibling call site.
+
+    The fulltext builder emitted ``CREATE FULLTEXT INDEX IF NOT EXISTS <name>``,
+    which Neo4j 5 rejects, so the symbol fulltext index was never created while
+    indexing reported success.
+    """
+    query = _captured_query(
+        "create_fulltext_index",
+        index_name="ast_symbol_fulltext",
+        labels=["Function", "Class", "Method"],
+        properties=["name", "qualified_name"],
+    )
+    assert re.search(r"CREATE FULLTEXT INDEX\s+ast_symbol_fulltext\s+IF NOT EXISTS", query), query
+
+
+def test_fulltext_index_uses_label_alternation_and_qualified_properties():
+    """``FOR ([A:B])`` and bare ``ON EACH [p]`` are both invalid Cypher."""
+    query = _captured_query(
+        "create_fulltext_index",
+        index_name="ast_symbol_fulltext",
+        labels=["Function", "Class", "Method"],
+        properties=["name", "qualified_name"],
+    )
+    assert "FOR (n:Function|Class|Method)" in query, query
+    assert "ON EACH [n.name, n.qualified_name]" in query, query
+    assert "([" not in query, f"label filter still bracketed: {query}"
+
+
+def test_standard_indexes_are_all_btree_shaped():
+    """STANDARD_INDEXES is unpacked as (label, property, name) and fed to
+    create_index. A fulltext entry (name, [labels], [properties]) in that list
+    produced CREATE INDEX ['name','qualified_name'] FOR (n:ast_symbol_fulltext).
+    """
+    from ast_rag.repositories.schema_manager import SchemaManager
+
+    for entry in SchemaManager.STANDARD_INDEXES:
+        label, property_name, index_name = entry
+        assert isinstance(label, str), entry
+        assert isinstance(property_name, str), entry
+        assert isinstance(index_name, str), entry
+
+    for index_name, labels, properties in SchemaManager.STANDARD_FULLTEXT_INDEXES:
+        assert isinstance(index_name, str)
+        assert isinstance(labels, list) and labels
+        assert isinstance(properties, list) and properties
