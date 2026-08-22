@@ -784,33 +784,15 @@ LIMIT $limit
             # Convert \\* to .* for wildcard matching
             return escaped.replace(r"\*", ".*")
 
-        raw_name = parsed.get("name", ".*")
-        if raw_name == ".*":
-            # Sentinel from _parse_signature_pattern meaning "any name": it is
-            # ALREADY regex. Running it through wildcard_to_regex would escape
-            # the dots into mandatory literal '.'s, so a bare '*' pattern like
-            # "*(int, String)" could never match any signature.
-            name_pattern = ".*"
-        else:
-            name_pattern = wildcard_to_regex(raw_name)
+        name_pattern = wildcard_to_regex(parsed.get("name", ".*"))
 
         # Build parameter pattern
         params = parsed.get("params", [])
         if params:
             param_patterns = [wildcard_to_regex(p.strip()) for p in params]
             # Match params list: (param1, param2, ...)
-            #
-            # Real stored signatures break the two assumptions the previous
-            # version made. First, wrapped multi-line signatures put a newline
-            # and indentation right after the opening paren, so `\(` had to be
-            # followed immediately by the first parameter's text and never
-            # matched (DOTALL only helps the `.`s, not literal adjacency).
-            # Second, several languages store parameter names alongside types
-            # ("int count", "model: SteerableModel"), so a type pattern must
-            # tolerate trailing non-comma text. `\s*,\s*` between parameters
-            # bridges the wrapped commas, and the optional `(?:,.*)?` tail
-            # tolerates additional parameters beyond the ones given.
-            params_pattern = r"\(\s*" + r"[^,]*,\s*".join(param_patterns) + r"[^,]*(?:,.*)?\)"
+            # Use flexible matching to allow for extra chars between params
+            params_pattern = r"\(" + r",\s*".join(param_patterns) + r".*\)"
         else:
             # Match either no params () or any params like (int x, ...)
             params_pattern = r"\(.*\)"

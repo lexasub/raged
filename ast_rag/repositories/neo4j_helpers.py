@@ -45,7 +45,6 @@ def create_driver(config: Neo4jConfig, create_if_not_exists: bool = True) -> Dri
         config.uri,
         auth=(config.user, config.password),
         database="neo4j",
-        connection_timeout=config.connection_timeout,
     )
 
     if create_if_not_exists and config.database != "neo4j":
@@ -67,14 +66,12 @@ def create_driver(config: Neo4jConfig, create_if_not_exists: bool = True) -> Dri
             config.uri,
             auth=(config.user, config.password),
             database=config.database,
-            connection_timeout=config.connection_timeout,
         )
     except Exception:
         return GraphDatabase.driver(
             config.uri,
             auth=(config.user, config.password),
             database="neo4j",
-            connection_timeout=config.connection_timeout,
         )
 
 

@@ -26,10 +26,6 @@ class Neo4jConfig(BaseModel):
     password: str = "password"
     database: str = "neo4j"
     project_id: str = "default"
-    # Kept short deliberately: the driver's default leaves the CLI apparently
-    # hung for tens of seconds when the service is simply not running, which is
-    # the usual state on a fresh clone.
-    connection_timeout: float = 10.0
 
 
 class QdrantConfig(BaseModel):

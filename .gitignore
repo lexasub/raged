@@ -58,7 +58,3 @@ config.local.json
 
 # Archive (not for publication)
 docs/archive/
-ast_rag_config.json
-
-# Local credentials/config (real Neo4j password, machine-specific paths)
-local_config.json

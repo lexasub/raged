@@ -26,38 +26,25 @@ Context-aware code intelligence system for AI agents and developers. Provides se
 | **Python** | `.py` | ⭐⭐ Good | Classes, functions, imports, type hints |
 | **TypeScript** | `.ts` | ⭐⭐ Good | Classes, interfaces, functions, imports |
 | **TSX / JSX** | `.tsx` `.jsx` | ⭐⭐ Good | Classes, interfaces, functions, imports, JSX elements |
-| **Go** | `.go` | ⭐⭐ Good | Functions, methods, structs, interfaces, imports |
 
 Files with other extensions are skipped during indexing with a warning listing the supported languages.
 
 ## 📦 Installation
 
 ```bash
-# 1. Clone and install
-git clone https://github.com/lexasub/raged && cd raged
+# 1. Clone repository
+git clone <repo> && cd raged
+
+# 2. Create virtual environment
 python -m venv venv && source venv/bin/activate
+
+# 3. Install dependencies
 pip install -e .
 
-# 2. Start Neo4j and Qdrant
-docker compose up -d
-
-# 3. Index and query — no config file needed
-ast-rag index-folder ./ast_rag
-ast-rag query "batch upsert nodes"
+# 4. Start Neo4j and Qdrant (Docker)
+docker run -d --name neo4j -p 7687:7687 -p 7474:7474 neo4j:latest
+docker run -d --name qdrant -p 6333:6333 qdrant/qdrant:latest
 ```
-
-The defaults point at the services `docker compose up -d` starts, so this works
-on a fresh clone with no configuration. To point elsewhere, set environment
-variables rather than editing a tracked file:
-
-```bash
-export AST_RAG_NEO4J_URI=bolt://myhost:7687
-export AST_RAG_NEO4J_PASSWORD=secret
-export AST_RAG_QDRANT_URL=http://myhost:6333
-```
-
-Or copy `ast_rag_config.example.json` to `ast_rag_config.json` and edit it
-(it is gitignored).
 
 ## ⚙️ Configuration
 
