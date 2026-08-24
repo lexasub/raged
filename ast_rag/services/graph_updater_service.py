@@ -345,17 +345,19 @@ def update_from_git(
             if lang is None:
                 continue
 
-            # Load new content (may no longer exist if deleted)
-            if not os.path.exists(file_path):
-                # File was deleted: all old nodes from this file need expiration.
-                # For PoC: we mark them by querying Neo4j.
+            rel_path = os.path.relpath(file_path, repo_path)
+
+            # Read the new side at new_commit, not from disk: this writes to
+            # the graph, so a dirty tree would persist code that never existed
+            # at the commit it gets stamped with. Uncommitted work has its own
+            # path in get_workspace_diff.
+            new_source = _read_blob(repo, new_commit, rel_path)
+            if new_source is None:
+                # Absent at new_commit: expire everything this file defined.
                 _expire_file_nodes(driver, file_path, new_commit)
                 continue
 
-            with open(file_path, "rb") as fh:
-                new_source = fh.read()
-
-            # Parse the NEW version
+            # Parse the version at new_commit
             new_tree = pm.parse_file(file_path, source=new_source)
             if new_tree is None:
                 continue
@@ -365,7 +367,6 @@ def update_from_git(
             )
 
             # Load old version from git at old_commit
-            rel_path = os.path.relpath(file_path, repo_path)
             old_source_bytes = _read_blob(repo, old_commit, rel_path)
             old_nodes: list[ASTNode] = []
             old_edges: list[ASTEdge] = []
@@ -509,11 +510,13 @@ def compute_diff_for_commits(
         if lang is None:
             continue
 
-        # Load new content (may no longer exist if deleted)
-        if not os.path.exists(file_path):
-            # File was deleted - we still process it to mark nodes for expiration
-            # Load old version from git
-            rel_path = os.path.relpath(file_path, repo_path)
+        rel_path = os.path.relpath(file_path, repo_path)
+
+        # Both sides come out of the object store. Reading the new side from
+        # disk would describe the working tree while stamping it to_commit.
+        new_source = _read_blob(repo, to_commit, rel_path)
+        if new_source is None:
+            # Absent at to_commit: expire whatever it defined at from_commit.
             old_source_bytes = _read_blob(repo, from_commit, rel_path)
             if old_source_bytes is not None:
                 old_tree = pm.parse_file(file_path, source=old_source_bytes)
@@ -532,10 +535,7 @@ def compute_diff_for_commits(
                     agg_diff.deleted_edge_ids.extend(file_diff.deleted_edge_ids)
             continue
 
-        with open(file_path, "rb") as fh:
-            new_source = fh.read()
-
-        # Parse the NEW version
+        # Parse the version at to_commit
         new_tree = pm.parse_file(file_path, source=new_source)
         if new_tree is None:
             continue
@@ -543,7 +543,6 @@ def compute_diff_for_commits(
         new_edges = pm.extract_edges(new_tree, new_nodes, file_path, lang, new_source, to_commit)
 
         # Load old version from git at from_commit
-        rel_path = os.path.relpath(file_path, repo_path)
         old_source_bytes = _read_blob(repo, from_commit, rel_path)
         old_nodes: list[ASTNode] = []
         old_edges: list[ASTEdge] = []
