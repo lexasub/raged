@@ -16,6 +16,11 @@ from ast_rag.services.embedding_manager import EmbeddingManager
 
 logger = logging.getLogger(__name__)
 
+# Edges are written as a single untyped ``:EDGE`` relationship with the
+# semantic kind on the ``kind`` property, so traversals match ``:EDGE`` and
+# filter on the kind. See ``batch_upsert_edges`` and #61.
+CAPTURE_EDGE_KINDS = ["CAPTURES"]
+
 
 class SearchService:
     """Service for unified code search operations.
@@ -484,7 +489,8 @@ LIMIT $limit
             List of lambda blocks with captured variables
         """
         conditions = ["b.valid_to IS NULL", "b.block_type = 'lambda'"]
-        params: dict[str, str] = {}
+        # Values are not all strings: the capture-kind filter binds a list.
+        params: dict[str, object] = {}
 
         if lang:
             conditions.append("b.lang = $lang")
@@ -493,15 +499,22 @@ LIMIT $limit
         where_clause = " AND ".join(conditions)
 
         if with_captured_vars:
+            # Edges are stored as :EDGE with the semantic kind on `kind`, so
+            # matching [:CAPTURES] could never bind. Note this stays empty for
+            # a second reason: the parsing layer does not emit CAPTURES edges
+            # or Variable nodes yet, so `captured_vars` is [] until it does.
+            # The shape is corrected here so it works once that lands. See #61.
             cypher = f"""
 MATCH (b:Block)
 WHERE {where_clause}
-OPTIONAL MATCH (b)-[:CAPTURES]->(v:Variable)
+OPTIONAL MATCH (b)-[r:EDGE]->(v:Variable)
+WHERE r.kind IN $capture_kinds AND r.valid_to IS NULL
 WITH b, collect(v.name) as captured_vars
 RETURN b, captured_vars
 ORDER BY b.file_path, b.start_line
 LIMIT $limit
 """
+            params["capture_kinds"] = CAPTURE_EDGE_KINDS
         else:
             cypher = f"""
 MATCH (b:Block)

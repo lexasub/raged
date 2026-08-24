@@ -52,6 +52,15 @@ from ast_rag.services.graph_updater_service import compute_diff_for_commits
 # traversals must filter on that property rather than on a relationship type.
 CALL_EDGE_KINDS = ["CALLS", "VIRTUAL_CALL", "LAMBDA_CALL", "CROSS_FILE_CALL"]
 
+# Edges are all written as a single untyped ``:EDGE`` relationship with the
+# semantic kind kept on the ``kind`` property (see ``batch_upsert_edges``), so
+# every traversal matches ``:EDGE`` and filters on these groups. Matching a
+# typed relationship such as ``[:INHERITS]`` compiles but can never return a
+# row, because no writer creates one. See #61.
+INHERITANCE_EDGE_KINDS = ["INHERITS", "EXTENDS", "IMPLEMENTS"]
+OVERRIDE_EDGE_KINDS = ["OVERRIDES"]
+TYPE_EDGE_KINDS = ["TYPES"]
+
 logger = logging.getLogger(__name__)
 
 # The active version filter used in all Cypher queries
@@ -467,15 +476,18 @@ LIMIT 500
         """Find all subclasses/implementors of the given type."""
         max_depth = min(max_depth, 5)
         cypher = f"""
-MATCH (child)-[:INHERITS|EXTENDS|IMPLEMENTS*1..{max_depth}]->(parent {{id: $node_id}})
+MATCH (child)-[rels:EDGE*1..{max_depth}]->(parent {{id: $node_id}})
 WHERE child.valid_to IS NULL
+  AND all(rel IN rels WHERE rel.kind IN $inheritance_kinds)
 RETURN DISTINCT child
 ORDER BY child.qualified_name
 LIMIT 100
 """
         results: list[ASTNode] = []
         with self._driver.session() as session:
-            for record in session.run(cypher, node_id=node_id):
+            for record in session.run(
+                cypher, node_id=node_id, inheritance_kinds=INHERITANCE_EDGE_KINDS
+            ):
                 results.append(_record_to_node(dict(record["child"])))
         return results
 
@@ -483,15 +495,18 @@ LIMIT 100
         """Find all parent classes/interfaces of the given type."""
         max_depth = min(max_depth, 5)
         cypher = f"""
-MATCH (child {{id: $node_id}})-[:INHERITS|EXTENDS|IMPLEMENTS*1..{max_depth}]->(parent)
+MATCH (child {{id: $node_id}})-[rels:EDGE*1..{max_depth}]->(parent)
 WHERE parent.valid_to IS NULL
+  AND all(rel IN rels WHERE rel.kind IN $inheritance_kinds)
 RETURN DISTINCT parent
 ORDER BY parent.qualified_name
 LIMIT 100
 """
         results: list[ASTNode] = []
         with self._driver.session() as session:
-            for record in session.run(cypher, node_id=node_id):
+            for record in session.run(
+                cypher, node_id=node_id, inheritance_kinds=INHERITANCE_EDGE_KINDS
+            ):
                 results.append(_record_to_node(dict(record["parent"])))
         return results
 
@@ -517,8 +532,9 @@ LIMIT 100
         cypher = f"""
 MATCH (base {{id: $method_node_id}})
 WHERE base.kind IN ['Method', 'Function']
-MATCH (overrider)-[:OVERRIDES*1..{max_depth}]->(base)
+MATCH (overrider)-[rels:EDGE*1..{max_depth}]->(base)
 WHERE overrider.valid_to IS NULL
+  AND all(rel IN rels WHERE rel.kind IN $override_kinds)
 RETURN DISTINCT overrider
 ORDER BY overrider.qualified_name
 LIMIT 100
@@ -526,7 +542,9 @@ LIMIT 100
         results: list[ASTNode] = []
 
         with self._driver.session() as session:
-            for record in session.run(cypher, method_node_id=method_node_id):
+            for record in session.run(
+                cypher, method_node_id=method_node_id, override_kinds=OVERRIDE_EDGE_KINDS
+            ):
                 node_data = dict(record["overrider"])
                 results.append(_record_to_node(node_data))
 
@@ -931,13 +949,13 @@ WHERE caller.valid_to IS NULL AND r.valid_to IS NULL AND r.kind IN $call_kinds
 RETURN count(*) as count
 """
         types_count_cypher = """
-MATCH (user)-[r:TYPES]->(target {id: $node_id})
-WHERE user.valid_to IS NULL AND r.valid_to IS NULL
+MATCH (user)-[r:EDGE]->(target {id: $node_id})
+WHERE user.valid_to IS NULL AND r.valid_to IS NULL AND r.kind IN $type_kinds
 RETURN count(*) as count
 """
         inherits_count_cypher = """
-MATCH (child)-[r:INHERITS|EXTENDS|IMPLEMENTS]->(parent {id: $node_id})
-WHERE child.valid_to IS NULL AND r.valid_to IS NULL
+MATCH (child)-[r:EDGE]->(parent {id: $node_id})
+WHERE child.valid_to IS NULL AND r.valid_to IS NULL AND r.kind IN $inheritance_kinds
 RETURN count(*) as count
 """
         total = 0
@@ -946,11 +964,13 @@ RETURN count(*) as count
             record = result.single()
             total += record["count"] if record else 0
 
-            result = session.run(types_count_cypher, node_id=node_id)
+            result = session.run(types_count_cypher, node_id=node_id, type_kinds=TYPE_EDGE_KINDS)
             record = result.single()
             total += record["count"] if record else 0
 
-            result = session.run(inherits_count_cypher, node_id=node_id)
+            result = session.run(
+                inherits_count_cypher, node_id=node_id, inheritance_kinds=INHERITANCE_EDGE_KINDS
+            )
             record = result.single()
             total += record["count"] if record else 0
 
@@ -1010,14 +1030,20 @@ SKIP $offset LIMIT $limit
 
         # Query for incoming TYPES edges with pagination
         types_cypher = """
-MATCH (user)-[r:TYPES]->(target {id: $node_id})
-WHERE user.valid_to IS NULL AND r.valid_to IS NULL
+MATCH (user)-[r:EDGE]->(target {id: $node_id})
+WHERE user.valid_to IS NULL AND r.valid_to IS NULL AND r.kind IN $type_kinds
 RETURN user, r
 ORDER BY user.qualified_name
 SKIP $offset LIMIT $limit
 """
         with self._driver.session() as session:
-            for record in session.run(types_cypher, node_id=node_id, offset=offset, limit=limit):
+            for record in session.run(
+                types_cypher,
+                node_id=node_id,
+                offset=offset,
+                limit=limit,
+                type_kinds=TYPE_EDGE_KINDS,
+            ):
                 user_data = dict(record["user"])
                 edge_data = dict(record["r"])
                 references.append(
@@ -1033,15 +1059,24 @@ SKIP $offset LIMIT $limit
                 )
 
         # Query for incoming INHERITS/EXTENDS/IMPLEMENTS edges with pagination
+        # ``type(r)`` is now always "EDGE", so the reported reference type comes
+        # from the ``kind`` property instead -- it is what carries the semantic
+        # relationship (INHERITS / EXTENDS / IMPLEMENTS).
         inherits_cypher = """
-MATCH (child)-[r:INHERITS|EXTENDS|IMPLEMENTS]->(parent {id: $node_id})
-WHERE child.valid_to IS NULL AND r.valid_to IS NULL
-RETURN child, r, type(r) as rel_type
+MATCH (child)-[r:EDGE]->(parent {id: $node_id})
+WHERE child.valid_to IS NULL AND r.valid_to IS NULL AND r.kind IN $inheritance_kinds
+RETURN child, r, r.kind as rel_type
 ORDER BY child.qualified_name
 SKIP $offset LIMIT $limit
 """
         with self._driver.session() as session:
-            for record in session.run(inherits_cypher, node_id=node_id, offset=offset, limit=limit):
+            for record in session.run(
+                inherits_cypher,
+                node_id=node_id,
+                offset=offset,
+                limit=limit,
+                inheritance_kinds=INHERITANCE_EDGE_KINDS,
+            ):
                 child_data = dict(record["child"])
                 edge_data = dict(record["r"])
                 references.append(

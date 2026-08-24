@@ -57,6 +57,7 @@ class EdgeKind(str, Enum):
     OVERRIDES = "OVERRIDES"
     DEPENDS_ON = "DEPENDS_ON"
     TYPES = "TYPES"
+    CAPTURES = "CAPTURES"  # Lambda/closure captures a variable
     VIRTUAL_CALL = "VIRTUAL_CALL"
     LAMBDA_CALL = "LAMBDA_CALL"
     CROSS_FILE_CALL = "CROSS_FILE_CALL"
