@@ -4,6 +4,11 @@ output.py - Output formatters for CLI.
 Abstraction layer for formatting CLI output. Supports:
 - JSON (AI-friendly, default)
 - Human-readable (Rich tables, with --humanize flag)
+
+JSON is the default, so a formatter must emit exactly one JSON document on
+stdout and nothing else -- including for empty results. Diagnostics belong on
+stderr (``err_console``), and anything the caller must know to interpret the
+result, such as an ambiguity note, is carried inside the document.
 """
 
 from __future__ import annotations
@@ -21,24 +26,35 @@ from ast_rag.dto import ASTNode, SearchResult
 
 console = Console()
 
+# Diagnostics go here so they never land in the middle of a JSON document.
+err_console = Console(stderr=True)
+
 
 class OutputFormatter(ABC):
     """Abstract base class for output formatters."""
 
     @abstractmethod
-    def format_search_results(self, results: list[SearchResult], query: str) -> None:
+    def format_search_results(
+        self, results: list[SearchResult], query: str, note: Optional[str] = None
+    ) -> None:
         """Format semantic search results."""
         pass
 
     @abstractmethod
     def format_definitions(
-        self, nodes: list[ASTNode], api: Optional[Any] = None, snippet: bool = False
+        self,
+        nodes: list[ASTNode],
+        api: Optional[Any] = None,
+        snippet: bool = False,
+        note: Optional[str] = None,
     ) -> None:
         """Format definition lookup results."""
         pass
 
     @abstractmethod
-    def format_callers(self, qualified_name: str, nodes: list[ASTNode]) -> None:
+    def format_callers(
+        self, qualified_name: str, nodes: list[ASTNode], note: Optional[str] = None
+    ) -> None:
         """Format callers results."""
         pass
 
@@ -46,7 +62,9 @@ class OutputFormatter(ABC):
 class JSONFormatter(OutputFormatter):
     """AI-friendly JSON output (default)."""
 
-    def format_search_results(self, results: list[SearchResult], query: str) -> None:
+    def format_search_results(
+        self, results: list[SearchResult], query: str, note: Optional[str] = None
+    ) -> None:
         output = {
             "query": query,
             "count": len(results),
@@ -62,10 +80,16 @@ class JSONFormatter(OutputFormatter):
                 for r in results
             ],
         }
+        if note:
+            output["ambiguous"] = note
         print(json.dumps(output, indent=2))
 
     def format_definitions(
-        self, nodes: list[ASTNode], api: Optional[Any] = None, snippet: bool = False
+        self,
+        nodes: list[ASTNode],
+        api: Optional[Any] = None,
+        snippet: bool = False,
+        note: Optional[str] = None,
     ) -> None:
         output = {
             "count": len(nodes),
@@ -82,9 +106,13 @@ class JSONFormatter(OutputFormatter):
                 for n in nodes
             ],
         }
+        if note:
+            output["ambiguous"] = note
         print(json.dumps(output, indent=2))
 
-    def format_callers(self, qualified_name: str, nodes: list[ASTNode]) -> None:
+    def format_callers(
+        self, qualified_name: str, nodes: list[ASTNode], note: Optional[str] = None
+    ) -> None:
         output = {
             "target": qualified_name,
             "count": len(nodes),
@@ -99,6 +127,8 @@ class JSONFormatter(OutputFormatter):
                 for n in nodes
             ],
         }
+        if note:
+            output["ambiguous"] = note
         print(json.dumps(output, indent=2))
 
 
@@ -120,7 +150,9 @@ class HumanFormatter(OutputFormatter):
             return kind
         return f"[{color}]{kind}[/{color}]"
 
-    def format_search_results(self, results: list[SearchResult], query: str) -> None:
+    def format_search_results(
+        self, results: list[SearchResult], query: str, note: Optional[str] = None
+    ) -> None:
         table = Table(
             "Score",
             "Kind",
@@ -143,7 +175,11 @@ class HumanFormatter(OutputFormatter):
         console.print(table)
 
     def format_definitions(
-        self, nodes: list[ASTNode], api: Optional[Any] = None, snippet: bool = False
+        self,
+        nodes: list[ASTNode],
+        api: Optional[Any] = None,
+        snippet: bool = False,
+        note: Optional[str] = None,
     ) -> None:
         for node in nodes:
             console.print(
@@ -174,7 +210,9 @@ class HumanFormatter(OutputFormatter):
                         )
                     )
 
-    def format_callers(self, qualified_name: str, nodes: list[ASTNode]) -> None:
+    def format_callers(
+        self, qualified_name: str, nodes: list[ASTNode], note: Optional[str] = None
+    ) -> None:
         table = Table(
             "Kind",
             "Lang",

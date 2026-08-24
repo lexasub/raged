@@ -52,7 +52,7 @@ from ast_rag.services.graph_updater_service import (
 )
 from ast_rag.services.embedding_manager import EmbeddingManager
 from ast_rag.api import ASTRagAPI
-from ast_rag.utils.output import get_formatter
+from ast_rag.utils.output import err_console, get_formatter
 from ast_rag.services.summarizer_service import SummarizerService
 
 app = typer.Typer(
@@ -203,10 +203,16 @@ def _describe_ambiguity(name: str, defs: list) -> Optional[str]:
 
 
 def _warn_if_ambiguous(name: str, defs: list) -> Optional[str]:
-    """Print the ambiguity note (if any) and return it for JSON consumers."""
+    """Print the ambiguity note (if any) and return it for JSON consumers.
+
+    The note goes to stderr: stdout is a JSON document by default, and a
+    Rich-wrapped line printed into the middle of it is not parseable.
+    Callers that use a formatter pass the return value on so the note
+    survives inside the document too.
+    """
     note = _describe_ambiguity(name, defs)
     if note:
-        console.print(f"[yellow]{note}[/yellow]")
+        err_console.print(f"[yellow]{note}[/yellow]")
     return note
 
 
@@ -539,7 +545,8 @@ def query(
     )
 
     if not results:
-        console.print("[yellow]No results found.[/yellow]")
+        err_console.print("[yellow]No results found.[/yellow]")
+        formatter.format_search_results([], text)
         raise typer.Exit(0)
 
     formatter.format_search_results(results, text)
@@ -567,7 +574,8 @@ def goto(
     nodes = api.find_definition(qualified_name, kind=kind, lang=lang)
 
     if not nodes:
-        console.print(f"[yellow]Definition not found for: {qualified_name}[/yellow]")
+        err_console.print(f"[yellow]Definition not found for: {qualified_name}[/yellow]")
+        formatter.format_definitions([], api=api, snippet=snippet)
         raise typer.Exit(1)
 
     formatter.format_definitions(nodes, api=api, snippet=snippet)
@@ -593,21 +601,23 @@ def callers(
 
     defs = api.find_definition(qualified_name, lang=lang)
     if not defs:
-        console.print(f"[yellow]Symbol not found: {qualified_name}[/yellow]")
+        err_console.print(f"[yellow]Symbol not found: {qualified_name}[/yellow]")
+        formatter.format_callers(qualified_name, [])
         raise typer.Exit(1)
 
-    _warn_if_ambiguous(qualified_name, defs)
+    note = _warn_if_ambiguous(qualified_name, defs)
     target = defs[0]
     if humanize:
-        console.print(f"Finding callers of [bold]{target.qualified_name}[/bold]...")
+        err_console.print(f"Finding callers of [bold]{target.qualified_name}[/bold]...")
 
     caller_nodes = api.find_callers(target.id, max_depth=depth)
 
     if not caller_nodes:
-        console.print("[yellow]No callers found.[/yellow]")
+        err_console.print("[yellow]No callers found.[/yellow]")
+        formatter.format_callers(target.qualified_name, [], note=note)
         raise typer.Exit(0)
 
-    formatter.format_callers(target.qualified_name, caller_nodes)
+    formatter.format_callers(target.qualified_name, caller_nodes, note=note)
 
 
 # ---------------------------------------------------------------------------
