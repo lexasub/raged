@@ -145,7 +145,7 @@ pytest tests/ -v
 
 ## 🎯 Areas Needing Contribution
 
-- [ ] More language support (Go, Kotlin, Swift)
+- [ ] More language support (C#, Kotlin, Swift)
 - [ ] Performance optimizations
 - [ ] Additional MCP tools
 - [ ] Better error handling
