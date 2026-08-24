@@ -85,7 +85,7 @@ URL — set `embedding.remote_url` in the config file.
 |-------|-------|-----|
 | Empty results | Graph not indexed | `ast-rag init .` |
 | Low recall (<70%) | Not all files indexed | Check with `ast-rag stats`, then `ast-rag index-folder <path> --no-schema` |
-| Low precision | Noise in embeddings | Tune thresholds in `embeddings.py` |
+| Low precision | Noise in embeddings | Retune the hybrid weights: `ast-rag query ... --vector-weight 0.8 --keyword-weight 0.2` (defaults 0.7/0.3, or set `embedding.vector_weight` / `embedding.keyword_weight`) |
 | Stale results | Index outdated | `ast-rag workspace . --apply` |
 
 ---
