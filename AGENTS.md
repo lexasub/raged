@@ -36,15 +36,16 @@ ast-rag callers <name> --depth 2
 | `sig` | `ast-rag sig "process(int, String)"` | Signature search |
 | `evaluate` | `ast-rag evaluate --all` | Check quality |
 | `index-folder` | `ast-rag index-folder ./ast_rag` | Index a folder |
-| `workspace` | `ast-rag workspace . --apply` | Update from git diff |
+| `workspace` | `ast-rag workspace . --apply` | Update from uncommitted changes |
+| `stats` | `ast-rag stats` | See what is actually indexed |
 
 ### Python API
 
 ```python
 from ast_rag.ast_rag_api import ASTRagAPI
 from ast_rag.models import ProjectConfig
-from ast_rag.graph_schema import create_driver
-from ast_rag.embeddings import EmbeddingManager
+from ast_rag.repositories import create_driver
+from ast_rag.services import EmbeddingManager
 
 # Initialize
 cfg = ProjectConfig()
@@ -146,11 +147,8 @@ curl http://localhost:6333/collections
 **Check index:**
 
 ```bash
-# How many nodes in graph
-cypher-shell "MATCH (n) RETURN count(n)"
-
-# How many files indexed
-grep "COMPLETE" /tmp/index_*.log | wc -l
+# Node/edge counts, language distribution, indexed file count
+ast-rag stats
 ```
 
 ---
@@ -191,10 +189,10 @@ ast-rag evaluate --all
 
 ```bash
 # Check what's indexed
-grep "COMPLETE" /tmp/index_*.log | wc -l
+ast-rag stats
 
-# Index remaining
-./scripts/index-remaining.sh
+# Index what is missing
+ast-rag index-folder ./path/to/folder --no-schema
 
 # Run again
 ast-rag evaluate --all

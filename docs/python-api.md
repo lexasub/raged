@@ -9,8 +9,8 @@ Programmatic access to AST-RAG from scripts and applications.
 ```python
 from ast_rag.ast_rag_api import ASTRagAPI
 from ast_rag.models import ProjectConfig
-from ast_rag.graph_schema import create_driver
-from ast_rag.embeddings import EmbeddingManager
+from ast_rag.repositories import create_driver
+from ast_rag.services import EmbeddingManager
 
 # Initialize
 cfg = ProjectConfig()
@@ -63,12 +63,16 @@ for n in nodes:
 
 ### Find References
 
+`find_references` returns a paginated dict, and each reference is a plain dict:
+
 ```python
 # All usages
-refs = api.find_references("processRequest", kind="Method")
+result = api.find_references("processRequest", kind="Method", limit=50, offset=0)
+# {"references": [...], "total": int, "limit": int, "offset": int, "has_more": bool}
 
-for ref in refs:
-    print(f"{ref.node.file_path}:{ref.node.start_line}  {ref.reference_type}")
+for ref in result["references"]:
+    node = ref["node"]
+    print(f"{node['file_path']}:{node['start_line']}  {ref['reference_type']}")
 ```
 
 ---
@@ -131,25 +135,37 @@ print(code)
 
 ```python
 diff = api.get_diff(
+    repo_path="/path/to/codebase",
     from_commit="abc123",
-    to_commit="def456",
-    file_path="src/main.py"
+    to_commit="def456",   # defaults to HEAD
 )
 
-print(f"Added: {diff.added}, Removed: {diff.removed}")
+print(f"Added: {diff['added_count']}, Deleted: {diff['deleted_count']}, "
+      f"Updated: {diff['updated_count']}")
 ```
+
+`get_diff` covers the whole repository — there is no per-file filter — and
+returns a dict with `added` / `deleted` / `updated` node lists alongside those
+counts, plus `limit`, `offset` and `has_more`.
 
 ---
 
 ## 📊 Quality Evaluation
 
+There is no Python entry point for the benchmarks — they run through the CLI,
+from the repo root:
+
+```bash
+ast-rag evaluate --all --output results.json
+```
+
+The JSON it writes (`benchmarks/results/evaluation.json` by default) can be read
+back directly:
+
 ```python
-from ast_rag.benchmarks.evaluator import BenchmarkEvaluator
+import json
 
-evaluator = BenchmarkEvaluator()
-
-# Run all benchmarks
-results = evaluator.run_all()
+results = json.load(open("benchmarks/results/evaluation.json"))
 
 print(f"Pass Rate: {results['pass_rate']*100:.1f}%")
 print(f"F1 Score: {results['average_metrics']['f1_score']:.2f}")
@@ -159,31 +175,38 @@ print(f"F1 Score: {results['average_metrics']['f1_score']:.2f}")
 
 ## 🔄 Indexing
 
-### Full Indexing
+There is no single "index this directory" function — walking files, parsing and
+writing to Neo4j are separate steps. For a whole codebase, use the CLI
+(`ast-rag init <path>` / `ast-rag index-folder <path>`); the pieces below are for
+building on top of it.
+
+### Parse a File
 
 ```python
-from ast_rag.graph_updater import full_index
-from ast_rag.graph_schema import apply_schema
+from ast_rag.services.parsing import ParserManager
 
-# Apply schema
-apply_schema(driver)
+pm = ParserManager()
 
-# Index
-stats = full_index(driver, "/path/to/codebase", commit="v1.0")
+path = "/path/to/file.py"
+lang = pm.detect_language(path)             # "python", "go", "java", ... or None
+source = open(path, "rb").read()
 
-print(f"Nodes: {stats.nodes}, Edges: {stats.edges}")
+tree = pm.parse_file(path, source=source)
+nodes = pm.extract_nodes(tree, path, lang, source, commit_hash="v1.0")
+edges = pm.extract_edges(tree, nodes, path, lang, source, commit_hash="v1.0")
 ```
 
-### Index Folder
+`source` is not optional in practice — `extract_nodes` returns an empty list
+without it.
+
+### Write to the Graph
 
 ```python
-from ast_rag.graph_updater import index_directory
+from ast_rag.repositories import apply_schema
+from ast_rag.graph_updater import full_index
 
-stats = index_directory(
-    driver,
-    "/path/to/folder",
-    exclude_patterns=[".git", "venv", "__pycache__"]
-)
+apply_schema(driver)
+full_index(driver, nodes, edges, commit_hash="v1.0")   # returns None
 ```
 
 ### Update from Git Diff
@@ -191,14 +214,14 @@ stats = index_directory(
 ```python
 from ast_rag.graph_updater import update_from_git
 
-diff_stats = update_from_git(
+diff = update_from_git(
     driver,
-    root="/path/to/codebase",
-    from_commit="HEAD~1",
-    to_commit="HEAD"
+    repo_path="/path/to/codebase",
+    old_commit="HEAD~1",
+    new_commit="HEAD",
 )
 
-print(f"Changed: +{diff_stats.added}, -{diff_stats.deleted}")
+print(f"+{len(diff.added_nodes)} nodes, -{len(diff.deleted_node_ids)} nodes")
 ```
 
 ### Update Workspace
@@ -206,15 +229,19 @@ print(f"Changed: +{diff_stats.added}, -{diff_stats.deleted}")
 ```python
 from ast_rag.graph_updater import get_workspace_diff, apply_workspace_diff
 
-# Get changes
-diff = get_workspace_diff(driver, root=".")
+# Get changes (read-only)
+diff = get_workspace_diff(driver, repo_path=".")
 
 if not diff.is_empty:
     print(f"+{len(diff.added_nodes)} nodes, +{len(diff.added_edges)} edges")
-    
+
     # Apply
-    apply_workspace_diff(driver, root=".")
+    apply_workspace_diff(driver, repo_path=".")
 ```
+
+All three return a `DiffResult` with `added_nodes`, `deleted_node_ids`,
+`updated_nodes`, `added_edges`, `deleted_edge_ids`, `updated_edges` and the
+`is_empty` property.
 
 ---
 
@@ -223,7 +250,7 @@ if not diff.is_empty:
 ### Check Connection
 
 ```python
-from ast_rag.graph_schema import create_driver
+from ast_rag.repositories import create_driver
 from ast_rag.models import ProjectConfig
 
 cfg = ProjectConfig()
@@ -320,7 +347,7 @@ for cls in classes:
         print(f"File: {cls.file_path}\n")
         
         for method in subgraph.nodes:
-            if method.node_type == "Method":
+            if method.kind == "Method":
                 print(f"- `{method.name}`")
 ```
 

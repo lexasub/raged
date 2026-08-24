@@ -28,13 +28,19 @@
 
 ### Environment Variables (optional)
 
+These are applied last, on top of anything loaded from `ast_rag_config.json`:
+
 ```bash
-export NEO4J_URI="bolt://localhost:7687"
-export NEO4J_USER="neo4j"
-export NEO4J_PASSWORD="password"
-export QDRANT_URL="http://localhost:6333"
-export EMBEDDING_URL="http://localhost:1113/v1/embeddings"
+export AST_RAG_NEO4J_URI="bolt://localhost:7687"
+export AST_RAG_NEO4J_USER="neo4j"
+export AST_RAG_NEO4J_PASSWORD="password"
+export AST_RAG_NEO4J_DATABASE="neo4j"
+export AST_RAG_QDRANT_URL="http://localhost:6333"
+export AST_RAG_QDRANT_COLLECTION="ast_rag_nodes"
 ```
+
+That is the complete set. There is no environment override for the embedding
+URL — set `embedding.remote_url` in the config file.
 
 ---
 
@@ -55,7 +61,7 @@ export EMBEDDING_URL="http://localhost:1113/v1/embeddings"
 | Connection refused | Neo4j not running | `docker run -d --name neo4j -p 7687:7687 neo4j:latest` |
 | Auth failed | Wrong password | Check `NEO4J_PASSWORD` in config |
 | Empty results | Graph not indexed | `ast-rag init /path/to/codebase` |
-| Deadlock error | Parallel indexing | Use `./scripts/index-sequential.sh` |
+| Deadlock error | Parallel indexing | Index serially: `ast-rag index-folder <path> --workers 1` |
 
 ### Qdrant
 
@@ -78,7 +84,7 @@ export EMBEDDING_URL="http://localhost:1113/v1/embeddings"
 | Issue | Cause | Fix |
 |-------|-------|-----|
 | Empty results | Graph not indexed | `ast-rag init .` |
-| Low recall (<70%) | Not all files indexed | `./scripts/index-remaining.sh` |
+| Low recall (<70%) | Not all files indexed | Check with `ast-rag stats`, then `ast-rag index-folder <path> --no-schema` |
 | Low precision | Noise in embeddings | Tune thresholds in `embeddings.py` |
 | Stale results | Index outdated | `ast-rag workspace . --apply` |
 
@@ -120,14 +126,14 @@ cypher-shell "MATCH ()-[r]->() RETURN type(r) as type, count(r) ORDER BY count(r
 ### Check Indexing
 
 ```bash
-# How many folders indexed
-grep "COMPLETE" /tmp/index_*.log | wc -l
+# Node/edge counts, language distribution, indexed file count
+ast-rag stats
 
-# Which folders completed
-grep "COMPLETE" /tmp/index_*.log | cut -d: -f2
+# Same, as JSON
+ast-rag stats --json
 
-# Errors
-grep "ERROR" /tmp/index_*.log
+# Parse cache hit rate and configuration
+ast-rag cache-stats
 ```
 
 ### Check Quality
@@ -191,8 +197,8 @@ performance:
 ### Enable Debug Logs
 
 ```bash
-# For CLI
-ast-rag query "test" --verbose
+# For CLI (init, update, sig, evaluate, index-folder, workspace, summarize, ...)
+ast-rag index-folder ./src --verbose
 
 # For Python
 import logging
@@ -201,15 +207,12 @@ logging.basicConfig(level=logging.DEBUG)
 
 ### Indexing Logs
 
+Indexing logs to stderr; redirect it if you want a file to tail:
+
 ```bash
-# Main log
-tail -f index_sequential.log
-
-# Per-folder logs
-tail -f /tmp/index_*.log
-
-# Errors
-grep "ERROR" /tmp/index_*.log | tail -20
+ast-rag index-folder ./src --verbose 2>index.log
+tail -f index.log
+grep "ERROR" index.log | tail -20
 ```
 
 ---

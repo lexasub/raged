@@ -80,8 +80,8 @@ ast-rag analyze-stacktrace error.log -v
 
 ```python
 from ast_rag.stack_trace import StackTraceService
-from ast_rag.graph_schema import create_driver
-from ast_rag.embeddings import EmbeddingManager
+from ast_rag.repositories import create_driver
+from ast_rag.services import EmbeddingManager
 from ast_rag.models import ProjectConfig
 
 # Инициализация
