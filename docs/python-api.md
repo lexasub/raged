@@ -196,9 +196,6 @@ nodes = pm.extract_nodes(tree, path, lang, source, commit_hash="v1.0")
 edges = pm.extract_edges(tree, nodes, path, lang, source, commit_hash="v1.0")
 ```
 
-`source` is not optional in practice — `extract_nodes` returns an empty list
-without it.
-
 ### Write to the Graph
 
 ```python
