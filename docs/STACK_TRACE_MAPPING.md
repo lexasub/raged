@@ -1,17 +1,17 @@
 # Smart Stack Trace Mapping
 
-Сервис для автоматического анализа стектрейсов с маппингом на AST-ноды, извлечением кода и рекомендациями по исправлению.
+A service that analyzes stack traces: it maps each frame to an AST node, pulls the code, and suggests fixes.
 
-## Возможности
+## Features
 
-- **Парсинг стектрейсов** для 4 языков: Python, C++, Java, Rust
-- **Маппинг на AST** — каждый фрейм сопоставляется с узлом в графе кода
-- **Извлечение кода** — получение snippet'ов кода для каждого фрейма
-- **Анализ root cause** — определение категории ошибки,severity, причин
-- **Рекомендации по фиксу** — конкретные шаги для исправления
-- **Поиск похожих проблем** — семантический поиск аналогичных ошибок в кодебазе
+- **Stack trace parsing** for 4 languages: Python, C++, Java, Rust
+- **AST mapping**: each frame is matched to a node in the code graph
+- **Code extraction**: a code snippet for each frame
+- **Root cause analysis**: error category, severity and likely causes
+- **Fix suggestions**: concrete steps to fix the error
+- **Similar issue search**: semantic search for similar errors in the codebase
 
-## Поддерживаемые форматы стектрейсов
+## Supported stack trace formats
 
 ### Python
 ```
@@ -52,27 +52,27 @@ stack backtrace:
               at src/main.rs:10:1
 ```
 
-## Использование
+## Usage
 
 ### CLI
 
 ```bash
-# Анализ из файла
+# Analyze a file
 ast-rag analyze-stacktrace error.log
 
-# Анализ из stdin
+# Analyze stdin
 echo "$STACKTRACE" | ast-rag analyze-stacktrace
 
-# Вывод в JSON
+# JSON output
 ast-rag analyze-stacktrace error.log -o json
 
-# Вывод в текстовом формате
+# Plain text output
 ast-rag analyze-stacktrace error.log -o text
 
-# Пропустить AST маппинг для скорости
+# Skip AST mapping for speed
 ast-rag analyze-stacktrace error.log --no-ast-mapping
 
-# Подробный вывод
+# Verbose output
 ast-rag analyze-stacktrace error.log -v
 ```
 
@@ -84,14 +84,14 @@ from ast_rag.repositories import create_driver
 from ast_rag.services import EmbeddingManager
 from ast_rag.models import ProjectConfig
 
-# Инициализация
+# Initialize
 config = ProjectConfig.model_validate_json(open("ast_rag_config.json").read())
 driver = create_driver(config.neo4j)
 embed = EmbeddingManager(config.qdrant, config.embedding, neo4j_driver=driver)
 
 service = StackTraceService(driver, embed)
 
-# Анализ стектрейса
+# Analyze a stack trace
 trace = """
 Traceback (most recent call last):
   File "main.py", line 42, in <module>
@@ -101,21 +101,21 @@ ValueError: Invalid input
 
 report = service.analyze(trace)
 
-# Вывод результатов
-print(report.to_markdown())  # Markdown для человека
-print(report.to_json())      # JSON для машины
+# Print the results
+print(report.to_markdown())  # Markdown for people
+print(report.to_json())      # JSON for machines
 
-# Доступ к деталям
+# Details
 print(f"Error: {report.error_type}")
 print(f"Root cause: {report.root_cause.likely_cause}")
 print(f"Suggested fix: {report.root_cause.suggested_fix}")
 print(f"Mapped frames: {report.mapped_frames}/{report.total_frames}")
 
-# Анализ из файла
+# Analyze a file
 report = service.analyze_from_file("error.log")
 ```
 
-## Архитектура
+## Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────┐
@@ -179,7 +179,7 @@ report = service.analyze_from_file("error.log")
 └─────────────────────────────────────────────────────────┘
 ```
 
-## Модель данных
+## Data model
 
 ### StackFrame
 ```json
@@ -226,10 +226,10 @@ report = service.analyze_from_file("error.log")
 }
 ```
 
-## Категории ошибок
+## Error categories
 
-| Категория | Примеры | Severity |
-|-----------|---------|----------|
+| Category | Examples | Severity |
+|----------|----------|----------|
 | `null_pointer` | NullPointerException, NoneType | high |
 | `out_of_bounds` | IndexError, out_of_range | high |
 | `type_error` | TypeError, ClassCastException | medium |
@@ -241,43 +241,43 @@ report = service.analyze_from_file("error.log")
 | `concurrency` | ConcurrentModification, Deadlock | critical |
 | `panic` | panic, assertion failed | critical |
 
-## Интеграция с analyze_text
+## Integration with analyze_text
 
-Сервис использует существующий API `analyze_text` для дополнительного контекста:
+The service uses the existing `analyze_text` API for extra context:
 
 ```python
-# В StackTraceService.analyze()
+# In StackTraceService.analyze()
 text_results = self._analyze_with_text_api(stacktrace)
 if text_results and not report.similar_issues:
     report.similar_issues = self._convert_text_results_to_issues(text_results)
 ```
 
-Это позволяет находить релевантный код даже когда точный маппинг на AST не удался.
+This finds relevant code even when exact AST mapping fails.
 
-## Тесты
+## Tests
 
 ```bash
-# Запустить тесты
+# Run the tests
 pytest tests/test_stack_trace.py -v
 
-# Тесты парсеров
+# Parser tests
 pytest tests/test_stack_trace.py::TestPythonParser -v
 pytest tests/test_stack_trace.py::TestJavaParser -v
 pytest tests/test_stack_trace.py::TestCppParser -v
 pytest tests/test_stack_trace.py::TestRustParser -v
 
-# Тесты моделей
+# Model tests
 pytest tests/test_stack_trace.py::TestStackFrame -v
 pytest tests/test_stack_trace.py::TestStackTraceReport -v
 ```
 
-## Примеры
+## Examples
 
-См. `ast_rag/stack_trace/examples.py` для примеров стектрейсов и использования.
+See `ast_rag/stack_trace/examples.py` for sample stack traces and usage.
 
-## Расширение
+## Extending
 
-### Добавление нового парсера
+### Adding a new parser
 
 ```python
 from .models import StackFrame, Language
@@ -285,33 +285,33 @@ from .parsers import StackTraceParser
 
 class GoParser(StackTraceParser):
     def detect_language(self, stacktrace: str) -> Language:
-        # Логика детектирования
-        return Language.UNKNOWN  # или новый enum
+        # Detection logic
+        return Language.UNKNOWN  # or a new enum value
     
     def extract_error_info(self, stacktrace: str) -> tuple[str, str]:
-        # Извлечение типа и сообщения ошибки
+        # Extract the error type and message
         return "Error", ""
     
     def parse(self, stacktrace: str) -> list[StackFrame]:
-        # Парсинг фреймов
+        # Parse the frames
         return []
 
-# Регистрация в фабрике
+# Register it in the factory
 StackTraceParserFactory._parsers[Language.GO] = GoParser
 ```
 
-## Ограничения
+## Limitations
 
-- Требуется запущенный Neo4j для AST маппинга
-- Требуется запущенный Qdrant для семантического поиска
-- Точность маппинга зависит от полноты индексации кодебазы
-- Некоторые форматы стектрейсов могут требовать доработки парсеров
+- AST mapping needs a running Neo4j
+- Semantic search needs a running Qdrant
+- Mapping accuracy depends on how completely the codebase is indexed
+- Some stack trace formats may need parser work
 
-## Будущие улучшения
+## Future improvements
 
-- [ ] Поддержка Go, TypeScript, C#
-- [ ] Парсинг JSON/XML логов ошибок
-- [ ] Интеграция с GitHub Issues для поиска похожих проблем
-- [ ] ML-модель для классификации ошибок
-- [ ] Автоматическое создание PR с фиксом
-- [ ] Статистика частых ошибок по проекту
+- [ ] Go, TypeScript and C# support
+- [ ] Parse JSON/XML error logs
+- [ ] GitHub Issues integration to find similar problems
+- [ ] ML model for error classification
+- [ ] Open a PR with the fix automatically
+- [ ] Per-project stats on frequent errors
