@@ -59,6 +59,20 @@ export AST_RAG_QDRANT_URL=http://myhost:6333
 Or copy `ast_rag_config.example.json` to `ast_rag_config.json` and edit it
 (it is gitignored).
 
+### Optional extras
+
+`pip install -e .` gives you the `ast-rag` CLI. The other two console scripts
+need extras:
+
+```bash
+pip install -e ".[mcp]"     # ast-rag-mcp (MCP server), ast-rag-watch (file watcher)
+pip install -e ".[server]"  # embedding_server.py, for the GPU host
+pip install -e ".[dev]"     # pytest, mypy, ruff
+```
+
+Without `[mcp]`, `ast-rag-mcp` and `ast-rag-watch` are on `PATH` but fail with
+`ModuleNotFoundError: No module named 'mcp'` / `'watchdog'`.
+
 ## ⚙️ Configuration
 
 Create `ast_rag_config.json` in project root:
@@ -75,9 +89,21 @@ Create `ast_rag_config.json` in project root:
     "collection_name": "ast_rag_nodes"
   },
   "embedding": {
-    "model_name": "bge-m3",
-    "remote_url": "http://localhost:1113/v1/embeddings"
+    "model_name": "BAAI/bge-m3"
   }
+}
+```
+
+Embeddings are computed locally by default. To offload them to a separate
+embedding server, add `remote_url` — and `dimension` with it, which is required
+whenever `remote_url` is set (`docker compose up -d` does not start such a
+server):
+
+```json
+"embedding": {
+  "model_name": "bge-m3",
+  "remote_url": "http://localhost:1113/v1/embeddings",
+  "dimension": 1024
 }
 ```
 
@@ -116,29 +142,50 @@ ast-rag evaluate --all
 ## 🛠️ CLI Commands
 
 ```
-ast-rag init <path>              # Full indexing
-ast-rag update <path>            # Update from git diff
-ast-rag query "<text>"           # Semantic search
-ast-rag goto <name>              # Find definition
-ast-rag callers <name>           # Find callers
-ast-rag refs <name>              # Find references
-ast-rag sig <pattern>            # Signature search
-ast-rag evaluate                 # Quality evaluation
-ast-rag index-folder <path>      # Index a folder
-ast-rag workspace <path>         # Show workspace changes
-ast-rag sandbox <lang> <cmd>     # Run in Docker sandbox
+ast-rag init <path>                    # Full indexing
+ast-rag index-folder <path>            # Index a folder
+ast-rag create-database <name>         # Create a Neo4j database
+ast-rag update <path> --from-commit <a> --to-commit <b>
+                                       # Update from git diff a..b
+ast-rag workspace <path>               # Show workspace changes
+ast-rag query "<text>"                 # Semantic search
+ast-rag goto <name>                    # Find definition
+ast-rag callers <name>                 # Find callers
+ast-rag refs <name>                    # Find references
+ast-rag call-graph <name>              # Callers/callees graph around a function
+ast-rag symbol-impact <name>           # Definition + refs + callers + callees
+ast-rag sig <pattern>                  # Signature search
+ast-rag blocks <function>              # if/for/while/try/lambda/with blocks
+ast-rag lambdas                        # List lambda/closure blocks
+ast-rag summarize <name>               # LLM summary of a function/method/class
+ast-rag analyze-stacktrace [file]      # Map a stack trace onto the graph
+ast-rag stats                          # Statistics about the indexed codebase
+ast-rag cache-stats                    # Parse cache statistics
+ast-rag evaluate                       # Quality evaluation
+ast-rag sandbox <lang> [workdir] --cmd "<command>"
+                                       # Run in Docker sandbox
 ```
+
+`ast-rag <command> --help` lists the flags for each.
 
 ## 📊 Quality
 
-Current metrics (Phase 2):
+Phase 2 benchmark run, recorded 2026-02-26 and not re-measured since:
 
-| Metric | Target | Actual |
+| Metric | Target | Measured |
 |--------|--------|--------|
 | **Pass Rate** | >80% | **100%** ✅ |
 | **F1 Score** | >0.85 | **0.98** ✅ |
 | **Precision** | >0.85 | **0.98** ✅ |
 | **Recall** | >0.85 | **0.97** ✅ |
+
+The benchmarks in `benchmarks/queries/` are ground-truthed against AST-RAG's own
+source, so they measure this repo rather than yours. To reproduce, index this
+repo with Neo4j and Qdrant running, then from the repo root:
+
+```bash
+ast-rag evaluate --all
+```
 
 ## 🏗️ Architecture
 
@@ -201,9 +248,9 @@ Planned features and improvements:
 
 | Feature | Status | Description |
 |---------|--------|-------------|
-| **Code Summaries** | 🔜 Planned | Generate AI-powered summaries for functions/classes |
+| **Code Summaries** | ✅ Done | `ast-rag summarize` — LLM summaries for functions/classes ([docs](docs/SUMMARIZATION.md)) |
 | **Refactoring Hints** | 🔜 Planned | Detect code smells and suggest improvements |
-| **More Languages** | 🔜 Planned | Go, C#, Kotlin with full AST support |
+| **More Languages** | 🔜 Planned | C#, Kotlin with full AST support |
 | **IDE Integration** | 🔄 In Progress | MCP, skills, CLI for OpenCode, Kilocode, Claude Code, Cursor |
 | **Incremental Indexing** | ✅ Done | Git-based and filesystem watcher updates (improving for large codebases) |
 | **Rust Rewrite** | 🔜 Planned | Full rewrite in Rust for performance, type safety, and easier integration |

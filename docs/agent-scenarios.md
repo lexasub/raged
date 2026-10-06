@@ -154,8 +154,8 @@ ast-rag evaluate --all
 # Index specific folder
 ast-rag index-folder ./src/modified_module --no-schema
 
-# Or all remaining
-./scripts/index-remaining.sh
+# Or re-index everything
+ast-rag init .
 ```
 
 ---
@@ -172,8 +172,8 @@ ast-rag sig "process(int, String)"
 ast-rag sig "get*" --lang java
 ast-rag sig "*Handler" --lang python
 
-# With filter
-ast-rag sig "build*" --lang rust --kind Function
+# With a result cap
+ast-rag sig "build*" --lang rust --limit 50
 ```
 
 **Python API:**
@@ -203,11 +203,11 @@ ast-rag evaluate --query benchmarks/queries/def_001.json
 
 **If quality is low:**
 ```bash
-# Check how many indexed
-grep "COMPLETE" /tmp/index_*.log | wc -l
+# Check what is in the graph
+ast-rag stats
 
-# Index remaining
-./scripts/index-remaining.sh
+# Index what is missing
+ast-rag index-folder ./path/to/folder --no-schema
 
 # Check again
 ast-rag evaluate --all
@@ -227,7 +227,7 @@ cypher-shell "MATCH (n) RETURN count(n)"
 cypher-shell "MATCH (n:Method) RETURN count(n)"
 
 # 3. Check indexing
-grep "COMPLETE" /tmp/index_*.log | wc -l
+ast-rag stats
 
 # 4. Re-index
 ast-rag init /path/to/codebase

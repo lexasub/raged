@@ -69,11 +69,17 @@ cat > ast_rag_config.json <<EOF
   },
   "embedding": {
     "model_name": "bge-m3",
-    "remote_url": "http://localhost:1113/v1/embeddings"
+    "remote_url": "http://localhost:1113/v1/embeddings",
+    "dimension": 1024
   }
 }
 EOF
 ```
+
+`remote_url` is what routes embeddings to the server from step 2 — drop it to
+embed locally instead. When it is set, `dimension` must be set too, otherwise
+collection creation fails with
+`EmbeddingConfig.dimension must be set when using remote_url`.
 
 ### 2. Index project
 
@@ -96,7 +102,10 @@ ast-rag index-folder ./src
 ast-rag evaluate --all
 ```
 
-**Expected result:**
+The benchmarks live in `benchmarks/queries/` and are ground-truthed against
+AST-RAG's own source, so this only means anything with the AST-RAG repo indexed,
+and it has to be run from the repo root. Output looks like:
+
 ```
 📊 Benchmarks: 10
 ✅ Passed: 10
@@ -164,11 +173,10 @@ ast-rag workspace . --apply
 
 ```bash
 # Update from git diff
-ast-rag update . --from HEAD~1 --to HEAD
-
-# Update current branch
-ast-rag update . --current-branch
+ast-rag update . --from-commit HEAD~1 --to-commit HEAD
 ```
+
+Both `--from-commit` and `--to-commit` are required.
 
 ---
 
@@ -253,11 +261,11 @@ ast-rag init /path/to/codebase
 ### Low quality (<70%)
 
 ```bash
-# Check how many indexed
-grep "COMPLETE" /tmp/index_*.log | wc -l
+# Check what is actually in the graph
+ast-rag stats
 
-# Index remaining
-./scripts/index-remaining.sh
+# Re-index the folders that are missing
+ast-rag index-folder ./path/to/folder --no-schema
 
 # Run evaluation again
 ast-rag evaluate --all
@@ -301,7 +309,7 @@ ast-rag query "main initialization entry point" --limit 5
 ast-rag goto <found_name> --snippet
 
 # 3. Find what it calls (call graph)
-ast-rag callers <entry_point> --depth 2
+ast-rag call-graph <entry_point> --direction callees --depth 2
 
 # 4. Find key dependencies
 ast-rag query "database connection manager" --limit 5

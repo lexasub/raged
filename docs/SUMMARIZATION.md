@@ -51,13 +51,13 @@ ast-rag summarize MyFunction --max-callers 10 --max-callees 10
 
 ```python
 from ast_rag.ast_rag_api import ASTRagAPI
-from ast_rag.graph_schema import create_driver
-from ast_rag.embeddings import EmbeddingManager
+from ast_rag.repositories import create_driver
+from ast_rag.services import EmbeddingManager
 from ast_rag.summarizer import SummarizerService, NodeSummary
 from ast_rag.models import ProjectConfig
 
-# Load configuration
-cfg = ProjectConfig.model_validate_json("ast_rag_config.json")
+# Load configuration (model_validate_json takes JSON text, not a path)
+cfg = ProjectConfig.model_validate_json(open("ast_rag_config.json").read())
 
 # Initialize API
 driver = create_driver(cfg.neo4j)
@@ -187,7 +187,7 @@ Processes HTTP requests by validating input, calling external services, and retu
 |-----------|---------|-------------|
 | `base_url` | `http://localhost:11434/v1` | OpenAI-compatible API endpoint |
 | `model` | `qwen2.5-coder:14b` | Model name for summarization |
-| `api_key` | `ollama` | API key (not needed for Ollama) |
+| `api_key` | `None` | API key (not needed for Ollama) |
 | `timeout` | `120` | Request timeout in seconds |
 
 ### Supported LLM Backends
